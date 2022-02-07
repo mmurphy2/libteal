@@ -1,0 +1,86 @@
+#!/bin/dash
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+usage() {
+    cat << EOF
+$0 [options] <PACKAGES.TXT> <output_directory>
+
+Options:
+    -h | --help
+        Show this help message and exit.
+    -s <num> | --strip <num>
+        Strip <num> path elements from the beginning of the PACKAGE LOCATION
+        path in each package file.
+
+Processes a Slackware PACKAGES.TXT file, splitting it into individual package
+data files. Each package data file is given the name of the package (less the
+trailing .t?z).
+
+WARNING: All files matching the pattern *-*-*-* will be deleted from the
+<output_directory> first. This way, a later version of PACKAGES.TXT (for
+example, with upgraded packages) does not leave behind stale package data
+files.
+EOF
+}
+
+
+whatami=$(readlink -e "$0")
+whereami=$(dirname "${whatami}")
+
+
+strip_prefix=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+        ;;
+        -s|--strip)
+            strip_prefix="$2"
+            shift 2
+        ;;
+        *)
+            break
+        ;;
+    esac
+done
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 [options] <PACKAGES.TXT> <output_directory>"
+    exit 2
+fi
+
+
+# We're going to change directory, so get the absolute path to the input file
+in_file=$(readlink -e "$1")
+
+
+if [ -f "${in_file}" ]; then
+    mkdir -p "$2" || exit 1
+    cd "$2" || exit 1
+    rm -f *-*-*-* 2>/dev/null
+    awk -f "${whereami}/process_package_list.awk" -v strip_prefix="${strip_prefix}" "${in_file}"
+else
+    echo "Input file not found: ${in_file}" >&2
+    exit 1
+fi

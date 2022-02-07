@@ -1,0 +1,266 @@
+#!/bin/dash
+#
+# Style management tool for colors and font effects. This tool facilitates
+# color and font changes by means of table lookups.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+usage() {
+    cat << EOF
+$0 [options] <bgcolor | fgcolor | font> <style_name>
+$0 [options] getcolor <color_name>
+$0 [options] env <style_name> <bg_var> <fg_var> <font_var>
+
+Options:
+    -c <color_map_file> | --color-map <color_map_file>
+        Load the specified <color_map_file> to map color names to numbers.
+    -e | --environment
+        After loading the color map and style file, dump enviornment
+        variables suitable for use with eval.
+    -h | --help
+        Show this help message and exit.
+    -m | --color-map-template
+        Display a color map template and exit.
+    -s <style_file> | --style-file <style_file>
+        Load the specified <style_file>.
+    -t | --style-template
+        Display a style file template and exit.
+
+This program simplifies color and font effect management for terminal programs
+by enabling predefined color name to color code mappings as well as predefined
+style names to background/foreground colors and font effects. Color name
+mappings are performed using a color map file, a sample of which may be
+obtained using the -m option. Style files map style names to background and
+foreground colors, along with font effects. A sample style file may be
+obtained with the -t option.
+
+The intended way to incorporate this program into a script is to:
+
+eval \$(style -c /path/to/colormap -s /path/to/stylefile -e)
+
+This approach will set the STYLE_COLOR_MAP and STYLE_STYLES environment
+variables, from which future calls to the program will look up the
+requested information. If these variables are not set, the sample color map
+and style file will be used.
+
+Individual style components can be resolved using the bgcolor, fgcolor, and
+font commands. Similarly, a color name can be resolved to a number using the
+getcolor command. For convenience in scripting, the "env" command will
+produce export lines that will set user-specified background, foreground,
+and font variable names to the corresponding values for a given style.
+EOF
+}
+
+example_style() {
+    cat << EOF
+# Example style file
+#################################################################
+# name          fg                bg             font
+#################################################################
+header          bright-white      default        bold,underline
+error           bright-red        default        bold
+warning         bright-yellow     default        bold
+notice          bright-white      default        default
+highlight       black             yellow         default
+EOF
+}
+
+
+example_colormap() {
+    cat << EOF
+# Example color map (16 colors)
+#
+# color-name              value
+###############################
+black                         0
+red                           1
+green                         2
+yellow                        3
+blue                          4
+magenta                       5
+cyan                          6
+white                         7
+gray                          8
+grey                          8
+bright-red                    9
+bright-green                 10
+bright-yellow                11
+bright-blue                  12
+bright-magenta               13
+bright-cyan                  14
+bright-white                 15
+EOF
+}
+
+
+# get_color <name>
+#
+# Echoes the color value, if found in the color map.
+get_color() {
+    case "$1" in
+        default)
+            echo ""
+        ;;
+        *)
+            local map_line=$(echo "${STYLE_COLOR_MAP}" | grep -m 1 "^$1[[:space:]]")
+
+            if [ -n "${map_line}" ]; then
+                echo "${map_line}" | awk '{print $2}'
+            fi
+        ;;
+    esac
+}
+
+
+# get_style <style_name>
+#
+# Echoes the line of the style file containing the requested style, if it exists.
+get_style() {
+    echo "${STYLE_STYLES}" | grep -m 1 "^$1[[:space:]]"
+}
+
+
+# get_bgcolor <style_line>
+#
+# Convenience function for retrieving a background color value from a style file line
+get_bgcolor() {
+    local bgfield=$(echo "${line}" | awk '{print $3}')
+    get_color "${bgfield}"
+}
+
+
+# get_fgcolor <style_line>
+#
+# Convenience function for retrieving a foreground color value from a style file line
+get_fgcolor() {
+    local fgfield=$(echo "${line}" | awk '{print $2}')
+    get_color "${fgfield}"
+}
+
+
+# get_font_list <style_line>
+#
+# Convenience function for retrieving the font list from a style file line
+get_font_list() {
+    echo "${line}" | awk '{print $4}'
+}
+
+
+show_env=
+
+# Handle options
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c|--color-map-file)
+            STYLE_COLOR_MAP=$(cat "$2")
+            shift 2
+        ;;
+        -e|--echo)
+            show_env=1
+            shift
+        ;;
+        -h|--help)
+            usage
+            exit 0
+        ;;
+        -m|--color-map-template)
+            example_colormap
+            exit 0
+        ;;
+        -s|--style-file)
+            STYLE_STYLES=$(cat "$2")
+            shift 2
+        ;;
+        -t|--style-template)
+            example_style
+            exit 0
+        ;;
+        *)
+            break
+        ;;
+    esac
+done
+
+
+if [ $# -ne 0 -a $# -ne 2 -a $# -ne 5 ]; then
+    echo "Usage: $0 [options] <bgcolor | fgcolor | font> <style_name>" >&2
+    echo "       $0 [options] getcolor <color_name>" >&2
+    echo "       $0 [options] env <style_name> <bg_var> <fg_var> <font_var>" >&2
+    exit 2
+fi
+
+
+# Load the built-in examples if the STYLE_COLOR_MAP and STYLE_STYLES are unset
+if [ -z "${STYLE_COLOR_MAP}" ]; then
+    STYLE_COLOR_MAP=$(example_colormap)
+fi
+
+if [ -z "${STYLE_STYLES}" ]; then
+    STYLE_STYLES=$(example_style)
+fi
+
+
+# Command processing
+if [ $# -gt 0 ]; then
+    case "$1" in
+        bgcolor|env|fgcolor|font)
+            line=$(get_style "$2")
+            if [ -n "${line}" ]; then
+                case "$1" in
+                    bgcolor)
+                        get_bgcolor "${line}"
+                    ;;
+                    env)
+                        bg=$(get_bgcolor "${line}")
+                        fg=$(get_fgcolor "${line}")
+                        fontlist=$(get_font_list "${line}")
+                        echo "$3='${bg}'; export $3;"
+                        echo "$4='${fg}'; export $4;"
+                        echo "$5='${fontlist}'; export $5;"
+                    ;;
+                    fgcolor)
+                        get_fgcolor "${line}"
+                    ;;
+                    font)
+                        get_font_list "${line}"
+                    ;;
+                esac
+            fi
+        ;;
+        getcolor)
+            get_color "$2"
+        ;;
+        *)
+            echo "Invalid command: $1" >&2
+            exit 2
+        ;;
+    esac
+fi
+
+
+# Finally, show the environment settings, if requested
+if [ -n "${show_env}" ]; then
+    echo "STYLE_COLOR_MAP='${STYLE_COLOR_MAP}';"
+    echo "export STYLE_COLOR_MAP;"
+    echo "STYLE_STYLES='${STYLE_STYLES}';"
+    echo "export STYLE_STYLES;"
+fi

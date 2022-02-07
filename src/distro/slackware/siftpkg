@@ -1,0 +1,94 @@
+#!/bin/dash
+#
+# Identifies available, installed, and upgradable packages by comparing the
+# package database to package information file directories. Repositories of
+# package information files are processed in priority order.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+self=$(readlink -e "$0")
+whereami=$(dirname "${self}")
+splitpkg="${whereami}/splitpkg"
+
+
+usage() {
+    cat << EOF
+$0 <package_database> <repository_directory> [[repository_directory] ...]
+
+Processes the system package database and repository directories (created by
+process_package_list) to determine which packages are installed, available,
+and upgradable. Repositories are processed in priority order from left to
+right. Thus, if a package is found in the first listed repository, it is
+masked from all subsequent repositories.
+
+The output of this script is a sorted list of packages, in which the available
+packages are listed first, the installable ones are listed second, and the
+upgradable ones are listed third. Available packages have the form:
+
+available package_name version arch build repository_directory
+
+Installed packages have the form:
+
+installed package_name version arch build [repository_directory]
+
+For installed packages, the repository_directory is only set if an enabled
+upstream repository has the same package available.
+
+Upgradable packages have the form:
+
+upgrade package_name version arch build repository_directory
+EOF
+}
+
+
+case "$1" in
+    -h|--help)
+        usage
+        exit 0
+    ;;
+esac
+
+
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <package_database> <repository_directory> [[repository_directory] ...]"
+    exit 2
+fi
+
+
+count=0
+while [ $# -gt 0 ]; do
+    # Be sure the arguments to find end with a trailing slash
+    slash=
+    echo "$1" | grep -q '/$' || slash="/"
+    next=$(find "$1${slash}" -mindepth 1 -maxdepth 1 -printf '%f\n' | ${splitpkg})
+
+    if [ ${count} -eq 0 ]; then
+        data="${next}"
+    else
+        data=$(printf '%s\n%s\n%s' "${data}" "=> $1" "${next}")
+    fi
+
+    shift
+    count=$(( count + 1 ))
+done
+
+echo "${data}" | awk -f "${whereami}/siftpkg.awk" | sort

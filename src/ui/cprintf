@@ -1,0 +1,157 @@
+#!/bin/dash
+#
+# Color printf, which supports background colors, foreground colors, and
+# font effects. Color and font support is disabled whenever the environment
+# variable CPRINTF_DISABLE_COLOR is set.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+usage() {
+    cat << EOF
+$0 [options] <format> [[value] ...]
+$0 [options] -e [[string] ...]
+
+Options:
+    -b <color> | --bgcolor <color>
+        Sets the background color.
+    -c <color> | --fgcolor <color>
+        Sets the text color.
+    -e | --echo
+        Changes from printf mode to echo mode. Any arguments are displayed,
+        followed by a newline.
+    -f <effects> | --font <effects>
+        Comma-separated value of font effects to apply. Valid effects are
+        bold, dim, faint, standout, underline, blink, reverse, and conceal.
+    -h | --help
+        Show this help message and exit.
+
+This application prints text using color using the printf(1) or echo(1)
+commands to produce the resulting output. Without the -e option, printf is
+used; the -e option changes the backend to echo. Note that both printf and
+echo are shell builtins, and those will normally be used.
+
+Colors are specified using numeric values, while fonts are specified using
+a comma-separated effects list. All color and font effects can be disabled by
+setting the CPRINTF_DISABLE_COLOR environment variable to any value.
+
+In addition to the command-line options, the environment variables
+CPRINTF_BGCOLOR, CPRINTF_COLOR, and CPRINTF_FONT may be used to specify
+background color, foreground color, and font effects, respectively. If
+supplied, command-line options override the environment variables.
+EOF
+}
+
+
+# get_font <effect> [[effect] ...]
+get_font() {
+    local font=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            bold)
+                font="${font} bold"
+            ;;
+            dim|faint)
+                font="${font} dim"
+            ;;
+            standout)
+                font="${font} smso"
+            ;;
+            underline)
+                font="${font} smul"
+            ;;
+            blink)
+                font="${font} blink"
+            ;;
+            reverse)
+                font="${font} rev"
+            ;;
+            conceal)
+                font="${font} invis"
+            ;;
+        esac
+        shift
+    done
+
+    echo "${font}"
+}
+
+
+fg_color="${CPRINTF_COLOR}"
+bg_color="${CPRINTF_BGCOLOR}"
+font="${CPRINTF_FONT}"
+use_echo=no
+
+
+# Handle options
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -b|--bgcolor)
+            bg_color="$2"
+            shift 2
+        ;;
+        -c|--color)
+            fg_color="$2"
+            shift 2
+        ;;
+        -e|--echo)
+            use_echo="yes"
+            shift
+        ;;
+        -f|--font)
+            font=$(get_font $(echo "$2" | tr ',' ' '))
+            shift 2
+        ;;
+        -h|--help)
+            usage
+            exit 0
+        ;;
+        *)
+            break
+        ;;
+    esac
+done
+
+
+# If color is enabled, set the colors and font
+if [ -z "${CPRINTF_DISABLE_COLOR}" ]; then
+    tput op
+    [ -n "${fg_color}" ] && tput setaf "${fg_color}"
+    [ -n "${bg_color}" ] && tput setab "${bg_color}"
+    for elt in ${font}; do
+        tput "${elt}"
+    done
+fi
+
+
+if [ $# -gt 0 -a "${use_echo}" != "yes" ]; then
+    printf "$@"
+else
+    echo "$@"
+fi
+
+
+# Clean up and reset the font and colors to defaults, to avoid surprises later
+if [ -z "${CPRINTF_DISABLE_COLOR}" ]; then
+    tput op
+    tput sgr0
+fi
