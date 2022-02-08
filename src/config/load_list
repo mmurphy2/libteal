@@ -1,7 +1,7 @@
 #!/bin/dash
 #
-# Loads the non-commented lines of a list file into a variable, preserving
-# the order of the list. Items in the variable are separated by newlines.
+# Loads the non-commented lines of a list file, preserving the order of the
+# list. Multiple list files may be concatenated.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -35,11 +35,6 @@ Options:
         valid as an argument to the tr(1) command.
     -h | --help
         Show this help message and exit.
-    -n | --no-export
-        Do not include an export statement in the output.
-    -s <var> | --store <var>
-        Set the output variable to <var>. If this option is not specified,
-        the default output variable is LIST.
 
 This program loads a list of data from one or more list files. If multiple
 list files are specified, they are read in order. The order of data within
@@ -48,13 +43,6 @@ each list file is also preserved.
 List files may contain line comments that begin with #. Inline comments are
 not supported. The resulting list read by this program will contain all
 non-blank, non-comment lines, with leading and trailing whitespace removed.
-
-The typical way to use this program is as follows:
-
-eval \$(load_list -s MY_LIST /path/to/list/file)
-
-where MY_LIST is the name of the environment variable into which the list
-should be stored. The list will be stored in a newline-separated format.
 EOF
 }
 
@@ -64,8 +52,6 @@ whereami=$(dirname "${self}")
 
 
 delim=
-evar="LIST"
-export="yes"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -76,14 +62,6 @@ while [ $# -gt 0 ]; do
         -h|--help)
             usage
             exit 0
-        ;;
-        -n|--no-export)
-            export="no"
-            shift
-        ;;
-        -s|--store)
-            evar="$2"
-            shift 2
         ;;
         *)
             break
@@ -101,6 +79,4 @@ if [ -n "${delim}" ]; then
     data=$(echo "${data}" | tr '\n' "${delim}")
 fi
 
-echo -n "${evar}='${data}';"
-[ "${export}" = "yes" ] && echo -n " export ${evar};"
-echo
+[ -n "${data}" ] && echo "${data}"

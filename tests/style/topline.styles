@@ -1,0 +1,48 @@
+# Color name to code mapping. This default map provides names for 16 colors,
+# but additional colors can be added for terminals with wider color support.
+# See: https://en.wikipedia.org/wiki/ANSI_escape_code#8-bi
+#
+############################################################################
+# color-name                                                           value
+############################################################################
+black                                                                      0
+red                                                                        1
+green                                                                      2
+yellow                                                                     3
+blue                                                                       4
+magenta                                                                    5
+cyan                                                                       6
+white                                                                      7
+gray                                                                       8
+grey                                                                       8
+bright-red                                                                 9
+bright-green                                                              10
+bright-yellow                                                             11
+bright-blue                                                               12
+bright-magenta                                                            13
+bright-cyan                                                               14
+bright-white                                                              15
+
+
+# Font map to terminal control sequences. See tput(1) and infocmp(1M).
+############################################################################
+# font-effect                                                  tput sequence
+############################################################################
+bold                                                                    bold
+dim                                                                      dim
+faint                                                                    dim
+standout                                                                smso
+underline                                                               smul
+blink                                                                  blink
+reverse                                                                  rev
+conceal                                                                invis
+
+
+# Style names are mapped to colors by name and to fonts by a comma-separated
+# list of font effects.
+############################################################################
+# name              fg                  bg                    font
+############################################################################
+topline-left        bright-blue         white                 bold,underline
+topline-center      bright-blue         white                 bold,underline
+topline-right       bright-blue         white                 bold,underline

@@ -1,7 +1,10 @@
 #!/usr/bin/awk
 #
 # AWK implementation for loading configuration files in INI format. Produces
-# variable-setting Bourne shell code that can be evaluated in scripts.
+# a hierarchical output directory containing the same information as the INI
+# file. If the underscores variable is set to a true value (passed with -v
+# on the command line), spaces are converted to underscores in produced
+# directory and file names.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -26,52 +29,28 @@
 
 # The wrapper script sends data to this program in the following format
 #
-# options line
 # filename
-# section.SYM1=value
-# section.SYM2=value
-# ---
-# VAR1=section.friendly name
-# VAR2=section.friendly name
+# VAR1=section/friendly name
+# VAR2=section/friendly name
+# (other preload lines)
 # ---
 # (verbatim configuration file data)
 
-# Following the options line is the filename, followed by data with which to preload
-# the symbol table for internal variable interpolation. After the symbol table comes a
-# list of environment variables mapped to friendly variable names within the configuration
-# file. We need to reverse this mapping in order to map the environment variables to
-# configuration *values*. The configuration data file appears below the variables region.
 
 BEGIN {
-    # The top region of the input is for preloading data, and its first line supplies
-    # options. Set the default options here, and provide for a way to track the filename
-    # and the base line of the input data on which the configuration file actually starts.
-    # This way, we can display useful error messages for configuration file issues.
+    # Track the filename and the base line of the input data on which the configuration file
+    # actually starts. This way, we can display useful error messages for configuration file issues.
     region = "preload"
-    export = "on"
-    unknown_key = "ignore"
     have_error = "no"
     filename = ""
     base_line = 0
+    valid_section = 1
     section = ""
     indent = 0
-    latest_index = ""
+    last_key = ""
 }
 
 (NR==1) {
-    # Handle the options line, which is line number 1. Options are whitespace-separated on this line.
-    for (i=1; i<=NF; i++) {
-        if ($i == "noexport") {
-            export = "off"
-        }
-        else if ($i == "errunmapped") {
-            unknown_key = "error"
-        }
-    }
-    next
-}
-
-(NR==2) {
     # Handle the filename line. We use the filename only for error messages.
     filename = $0
 
@@ -82,7 +61,7 @@ BEGIN {
     next
 }
 
-/^$/ {
+/^[ \t]*$/ {
     # Skip blank lines
     next
 }
@@ -93,15 +72,13 @@ BEGIN {
 }
 
 /^---$/ {
-    # Handle the region separator
+    # Handle the region separator. Fall through if we aren't in the preload section to throw a syntax
+    # error later.
     if (region == "preload") {
-        region = "variables"
-    }
-    else if (region == "variables") {
         region = "config"
         base_line = NR
+        next
     }
-    next
 }
 
 /[ \t]*\[.*\]/ {
@@ -111,6 +88,36 @@ BEGIN {
     section = tolower(substr($0, 2, length($0) - 2))
     sub(/^[ \t]*/, "", section)
     sub(/[ \t]*/, "", section)
+
+    # Sections with embedded slashes allow for a hierarchy to be created. However, we must take care
+    # to ensure that the resulting path can't escape the output directory. Disallow ".." as a path
+    # component for this reason, and convert absolute paths to relative.
+    count = split(section, pathparts, "/")
+    section = ""
+
+    # Assemble a sanitized section string. At the end of the process, we should have a section that
+    # contains no .. entries.
+    valid_section = 1
+    for (i=1; i<=count; i++) {
+        if (pathparts[i] == "..") {
+            print filename ": Illegal section name component (..) at line " (NR - base_line) > "/dev/stderr"
+            print "    > " $0 > "/dev/stderr"
+            have_error = "yes"
+            section = ""
+            valid_section = 0
+            break
+        }
+        else if (pathparts[i] != "" && pathparts[i] != ".") {
+            if (section == "") {
+                section = pathparts[i]
+            }
+            else {
+                section = section "/" pathparts[i]
+            }
+        }
+    }
+
+    last_key = ""
     next
 }
 
@@ -127,91 +134,94 @@ BEGIN {
     sub(/[ \t]*$/, "", pieces[1])
     sub(/^[ \t]*/, "", pieces[2])
 
-    if (region == "variables") {
-        # In the variables region, there can only be two pieces. The outer shell script
-        # "should" ensure this is the case, but wise to check anyway.
-        if (num_splits == 2) {
-            # Strip any trailing whitespace from the second piece, then store the entry in the
-            # environment variables (evars) map. Notice that evars maps the friendly name to
-            # the final environment variable name. We need the mapping to go in this direction
-            # so that the configuration value can be mapped to the proper environment variable
-            # later.
-            sub(/[ \t]*$/, "", pieces[2])
-            pieces[2] = tolower(pieces[2])
-            evars[pieces[2]] = pieces[1]
+    # Check for illegal names, since these could create security issues
+    if (pieces[1] == "..") {
+        print filename ": Invalid key at line " (NR - base_line) > "/dev/stderr"
+        print "    > " $0 > "/dev/stderr"
+        have_error = "yes"
+        last_key = ""
+        next
+    }
 
-            # If we have a preloaded value for this variable, go ahead and set it in result
-            if (symbol_table[pieces[2]] != "") {
-                result[pieces[1]] = symbol_table[pieces[2]]
-            }
-        }
-        else {
-            print "Invalid input at data line " NR > "/dev/stderr"
-            print "> " $0 > "/dev/stderr"
-            print "-- This is a bug in the wrapper script, not the configuration file!" > "/dev/stderr"
-            have_error = "yes"
+    # In the preload (top) and config (bottom) regions, there might be embedded = signs,
+    # resulting in more pieces. Reassemble the right hand side of the variable assignment.
+    pieces[1] = tolower(pieces[1])
+    value = pieces[2]
+    if (num_splits > 2) {
+        for (i=3; i<=num_splits; i++) {
+            value = value "=" pieces[i]
         }
     }
-    else if (region == "preload" || region == "config") {
-        # In the preload (top) and config (bottom) regions, there might be embedded = signs,
-        # resulting in more pieces. Reassemble the right hand side of the variable assignment.
-        pieces[1] = tolower(pieces[1])
-        value = pieces[2]
-        if (num_splits > 2) {
-            for (i=3; i<=num_splits; i++) {
-                value = value "=" pieces[i]
-            }
-        }
 
-        if (region == "preload") {
-            # Add the preloaded value to the symbol table.
-            symbol_table[pieces[1]] = value
+    if (region == "preload") {
+        # Add the preloaded value to the symbol table. These are stored mostly verbatim, but
+        # disallow leading slashes.
+        if (match(pieces[1], /^\//)) {
+            print "Ignoring preload for key: " pieces[1] > "/dev/stderr"
+            print "    Preload keys cannot begin with /" > "/dev/stderr"
+            have_error = "yes"
         }
         else {
-            full_key = section "." pieces[1]
-            if (evars[full_key] != "") {
-                # Perform any symbol table substitutions for this value, replacing variables
-                # values.
-                for (entry in symbol_table) {
-                    if (entry != "") {
-                        gsub("\\$\\{" entry "\\}", symbol_table[entry], value)
+            symbol_table[pieces[1]] = value
+        }
+    }
+    else {
+        # Outside the preload region, keys cannot have slashes in them
+        if (index(pieces[1], "/") > 0) {
+            print filename ": Invalid key at line " (NR - base_line) > "/dev/stderr"
+            print "    > " $0 > "/dev/stderr"
+            have_error = "yes"
+            last_key = ""
+            next
+        }
+        if (valid_section) {
+            this_key = section "/" pieces[1]
+            if (section == "") {
+                this_key = pieces[1]
+            }
+
+            # Perform any symbol table substitutions for this value, replacing variables
+            # values.
+            for (entry in symbol_table) {
+                if (entry != "") {
+                    # Process local variables first, so that they mask global (unsectioned)
+                    # variables.
+                    if (index(entry, section) == 1) {
+                        remainder = substr(entry, length(section) + 1)
+                        sub(/^\//, "", remainder)
+
+                        # Only consider symbols in this section and at this level. Any additional
+                        # slashes in the remainder indicate the entry belongs to a subsection.
+                        if (remainder != "" && index(remainder, "/") == 0) {
+                            gsub("\\$\\{" remainder "\\}", symbol_table[entry], value)
+                        }
                     }
-                }
 
-                # If there are any leftover unmatched variables in the input, prune them.
-                gsub(/\$\{.*\}/, "", value)
-
-                # Strip any trailing whitespace off the final value
-                sub(/[ \t]*$/, "", value)
-
-                # Add this value to the symbol table for later substitutions
-                symbol_table[full_key] = value
-
-                # Now store the value in the result array. Note that the keys of the result
-                # array are the environment variables, which are obtained by looking up the
-                # sectioned friendly name (full_key) in the evars array.
-                result[evars[full_key]] = value
-
-                # Save the indent amount and index (key) of the result array, in case we have a
-                # multiline value. With such values, we want the indentation to line up with the
-                # first nonblank character to the right of the "=" sign, or to the right of the
-                # = sign if blank
-                indent = index($0, "=") + 1
-                extra = match(substr($0, indent), /[^ \t]/)
-                if (extra > 1) {
-                    indent += extra - 1
-                }
-                last_index = evars[full_key]
-            }
-            else {
-                # By default, ignore configuration keys that are not mapped. An option may be set to
-                # change this behavior and make them into an error.
-                if (unknown_key == "error") {
-                    print filename ": in section [" section "]:" > "/dev/stderr"
-                    print "    Unknown key '" pieces[1] "' at line " (NR - base_line) > "/dev/stderr"
-                    have_error = "yes"
+                    # Take care of fully-qualified and global variables. A global variable
+                    # has no leading section name, while a fully-qualified variable gives
+                    # the path to the key in the form ${section/key}.
+                    gsub("\\$\\{" entry "\\}", symbol_table[entry], value)
                 }
             }
+
+            # If there are any leftover unmatched variables in the input, prune them.
+            gsub(/\$\{.*\}/, "", value)
+
+            # Strip any trailing whitespace off the final value
+            sub(/[ \t]*$/, "", value)
+
+            # Add this value to the symbol table for later substitutions
+            symbol_table[this_key] = value
+
+            # Save the indent amount and last output file, in case we have a multiline value.
+            # With such values, we want the indentation to line up with the first nonblank character
+            # to the right of the "=" sign, or to the right of the = sign if blank
+            indent = index($0, "=") + 1
+            extra = match(substr($0, indent), /[^ \t]/)
+            if (extra > 1) {
+                indent += extra - 1
+            }
+            last_key = this_key
         }
     }
     next
@@ -219,41 +229,48 @@ BEGIN {
 
 {
     first_char = match($0, /[^ \t]/)
-    if (indent > 0 && first_char >= indent) {
+    if (section != "" && indent > 0 && first_char >= indent && last_key != "") {
         # Multiline value: append it to the last saved result, but preserve internal indentation
-        value = substr($0, indent)
+        value = symbol_table[last_key] "\n" substr($0, indent)
         sub(/[ \t]*$/, value)
-        result[last_index] = result[last_index] "\n" value
+        symbol_table[last_key] = value
     }
     else {
         # Catch all: if none of the patterns match, we have a syntax error in the configuration
         # file. Note the location of the error. NB: /dev/stderr is defined for both gawk and
         # BusyBox awk.
         print filename ": Syntax error at line " (NR - base_line) > "/dev/stderr"
-        print "> " $0 > "/dev/stderr"
+        print "    > " $0 > "/dev/stderr"
         have_error = "yes"
     }
 }
 
 END {
-    # Output the environment variables in the format:
-    #
-    # VAR='value'; export VAR;
-    #
-    # The latter part (export VAR;) is omitted if exports are off.
-    #
-    for (evar in result) {
-        # Don't produce results for empty variables: outer shell code should handle this.
-        if (result[evar] != "") {
-            value = result[evar]
-            printf "%s='%s';", evar, value
-            if (export == "on") {
-                print " export " evar ";"
-            }
-            else {
-                print ""
-            }
+    # Now we need to dump the symbol table out to a directory hierarchy in the current working
+    # directory. This requires splitting the directory and file names from the qualified key names.
+    for (entry in symbol_table) {
+        num_cpts = split(entry, cpts, "/")
+
+        basename = cpts[num_cpts]
+        dirname = cpts[1]
+        for (i=2; i<num_cpts; i++) {
+            dirname = dirname "/" cpts[i]
         }
+
+        if (underscores) {
+            gsub(/[ \t]/, "_", basename)
+            gsub(/[ \t]/, "_", dirname)
+        }
+
+        dest = basename
+        if (num_cpts > 1) {
+            # Ensure the output directory exists
+            system("mkdir -p '" dirname "'")
+            dest = dirname "/" basename
+        }
+
+        # Finally, write the file:
+        print symbol_table[entry] > dest
     }
 
     # Set failure exit code whenever an error is detected in the configuration file

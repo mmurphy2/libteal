@@ -41,13 +41,13 @@ this command with the "end" argument.
 
 The status display is divided into 3 columns: left, center, and right. Content
 for the columns is set by means of the TOPLINE_LEFT, TOPLINE_CENTER, and
-TOPLINE_RIGHT environment variables, respectively. Colors are set using
-TOPLINE_LEFT_BGCOLOR, TOPLINE_LEFT_COLOR, TOPLINE_CENTER_BGCOLOR,
-TOPLINE_CENTER_COLOR, TOPLINE_RIGHT_BGCOLOR, and TOPLINE_RIGHT_COLOR. Font
-effects are set using environment variables TOPLINE_LEFT_FONT,
-TOPLINE_CENTER_FONT, and TOPLINE_RIGHT_FONT. Numeric color codes are required
-for the color values. Font values are comma-separated lists of the font
-effects: reset, bold, dim, faint, standout, underline, reverse, and conceal.
+TOPLINE_RIGHT environment variables, respectively. Colors and font effects
+are set by using the STYLES environment variable. By default, the styles
+named topline-left, topline-center, and topline-right will be used. However,
+the style names can be changed by setting the TOPLINE_LEFT_STYLE,
+TOPLINE_CENTER_STYLE, and TOPLINE_RIGHT_STYLE environment variables. Styles
+will be disabled if the TOPLINE_DISABLE_COLOR environment vbariable is set
+to any value. See the libteal style command for more information about styles.
 
 Once the environment variables are set, the "refresh" command triggers actual
 drawing of the status bar. The main script using this capability should trap
@@ -56,37 +56,57 @@ EOF
 }
 
 
-set_fonts() {
-    font=
-    for item in "$@"; do
-        case "${item}" in
-            bold)
-                font="${font} bold"
+TOPLINE_LEFT_STYLE="${TOPLINE_LEFT_STYLE:-topline-left}"
+TOPLINE_CENTER_STYLE="${TOPLINE_CENTER_STYLE:-topline-center}"
+TOPLINE_RIGHT_STYLE="${TOPLINE_RIGHT_STYLE:-topline-right}"
+
+
+# put_style <style-name> <fgcolor> <bgcolor> <font-effects>
+#
+# Sends the tput command required to set colors and fonts.
+put_style() {
+    local effect
+
+    [ -n "$2" -a "$2" != "-" ] && tput setaf "$2"
+    [ -n "32" -a "$3" != "-" ] && tput setab "$3"
+    for effect in $(echo "$4" | tr ',' ' '); do
+        if [ -n "${effect}" -a "${effect}" != "-" ]; then
+            tput "${effect}"
+        fi
+    done
+}
+
+
+# get_style <name>
+#
+# Looks up a style name in the STYLES environment variable.
+get_style() {
+    echo "${STYLES}" | tr ';' '\n' | grep -m 1 "^${1} "
+}
+
+
+# set_style <left | center | right>
+#
+# Sets the left, center, or right styles in preparation for printing text in the respective
+# column of the topline.
+set_style() {
+    local style
+
+    if [ -z "${TOPLINE_DISABLE_COLOR}" ]; then
+        case "$1" in
+            left)
+                style=$(get_style "${TOPLINE_LEFT_STYLE}")
             ;;
-            dim|faint)
-                font="${font} dim"
+            center)
+                style=$(get_style "${TOPLINE_CENTER_STYLE}")
             ;;
-            standout)
-                font="${font} smso"
-            ;;
-            underline)
-                font="${font} smul"
-            ;;
-            blink)
-                font="${font} blink"
-            ;;
-            reverse)
-                font="${font} rev"
-            ;;
-            conceal)
-                font="${font} invis"
+            right)
+                style=$(get_style "${TOPLINE_RIGHT_STYLE}")
             ;;
         esac
-    done
 
-    for op in ${font}; do
-        tput ${op}
-    done
+        [ -n "${style}" ] && put_style ${style}       # no quotes (parameter expansion)
+    fi
 }
 
 
@@ -149,24 +169,15 @@ case "$1" in
         tput sc                # Save current cursor position
         tput cup 0 0           # Go to the 1st column of the top line
 
-        # Set the background, left column colors, and left column font
-        [ -n "${TOPLINE_LEFT_BGCOLOR}" ] && tput setab "${TOPLINE_LEFT_BGCOLOR}"
-        [ -n "${TOPLINE_LEFT_COLOR}" ] && tput setaf "${TOPLINE_LEFT_COLOR}"
-        set_fonts $(echo "${TOPLINE_LEFT_FONT}" | tr ',' ' ')
+        set_style left
         printf '%s' "${text_left}"
         tput sgr0   # Reset fonts and colors
 
-        # Set the center background, colors, and font effects
-        [ -n "${TOPLINE_CENTER_BGCOLOR}" ] && tput setab "${TOPLINE_CENTER_BGCOLOR}"
-        [ -n "${TOPLINE_CENTER_COLOR}" ] && tput setaf "${TOPLINE_CENTER_COLOR}"
-        set_fonts $(echo "${TOPLINE_CENTER_FONT}" | tr ',' ' ')
+        set_style center
         printf '%s' "${text_center}"
         tput sgr0   # Reset fonts and colors
 
-        # Set the right background color, font color, and font effects
-        [ -n "${TOPLINE_RIGHT_BGCOLOR}" ] && tput setab "${TOPLINE_RIGHT_BGCOLOR}"
-        [ -n "${TOPLINE_RIGHT_COLOR}" ] && tput setaf "${TOPLINE_RIGHT_COLOR}"
-        set_fonts $(echo "${TOPLINE_RIGHT_FONT}" | tr ',' ' ')
+        set_style right
         printf '%s' "${text_right}"
         tput sgr0   # Reset fonts and colors
 

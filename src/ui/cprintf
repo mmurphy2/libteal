@@ -1,8 +1,8 @@
 #!/bin/dash
 #
 # Color printf, which supports background colors, foreground colors, and
-# font effects. Color and font support is disabled whenever the environment
-# variable CPRINTF_DISABLE_COLOR is set.
+# font effects using styles. Color and font support is disabled whenever the
+# environment variable CPRINTF_DISABLE_COLOR is set.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -31,99 +31,48 @@ $0 [options] <format> [[value] ...]
 $0 [options] -e [[string] ...]
 
 Options:
-    -b <color> | --bgcolor <color>
-        Sets the background color.
-    -c <color> | --fgcolor <color>
-        Sets the text color.
     -e | --echo
         Changes from printf mode to echo mode. Any arguments are displayed,
         followed by a newline.
-    -f <effects> | --font <effects>
-        Comma-separated value of font effects to apply. Valid effects are
-        bold, dim, faint, standout, underline, blink, reverse, and conceal.
     -h | --help
         Show this help message and exit.
+    -s <style> | --style <style>
+        Apply the given <style> to the output. If this option is omitted, the
+        output will not have color or font effects.
 
 This application prints text using color using the printf(1) or echo(1)
 commands to produce the resulting output. Without the -e option, printf is
 used; the -e option changes the backend to echo. Note that both printf and
 echo are shell builtins, and those will normally be used.
 
-Colors are specified using numeric values, while fonts are specified using
-a comma-separated effects list. All color and font effects can be disabled by
-setting the CPRINTF_DISABLE_COLOR environment variable to any value.
-
-In addition to the command-line options, the environment variables
-CPRINTF_BGCOLOR, CPRINTF_COLOR, and CPRINTF_FONT may be used to specify
-background color, foreground color, and font effects, respectively. If
-supplied, command-line options override the environment variables.
+To change the output color and font, a style must be specified with the -s
+option. If the specified style name can be found in the STYLES environment
+variable, the corresponding color and font effects will be applied.
+Otherwise, no effects will be applied. All effects can be disabled by
+setting CPRINTF_DISABLE_COLOR to any nonempty value. For information about
+styles, see the libteal style command.
 EOF
 }
 
 
-# get_font <effect> [[effect] ...]
-get_font() {
-    local font=""
-
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            bold)
-                font="${font} bold"
-            ;;
-            dim|faint)
-                font="${font} dim"
-            ;;
-            standout)
-                font="${font} smso"
-            ;;
-            underline)
-                font="${font} smul"
-            ;;
-            blink)
-                font="${font} blink"
-            ;;
-            reverse)
-                font="${font} rev"
-            ;;
-            conceal)
-                font="${font} invis"
-            ;;
-        esac
-        shift
-    done
-
-    echo "${font}"
-}
-
-
-fg_color="${CPRINTF_COLOR}"
-bg_color="${CPRINTF_BGCOLOR}"
-font="${CPRINTF_FONT}"
+style=
 use_echo=no
 
 
 # Handle options
 while [ $# -gt 0 ]; do
     case "$1" in
-        -b|--bgcolor)
-            bg_color="$2"
-            shift 2
-        ;;
-        -c|--color)
-            fg_color="$2"
-            shift 2
-        ;;
         -e|--echo)
             use_echo="yes"
             shift
         ;;
-        -f|--font)
-            font=$(get_font $(echo "$2" | tr ',' ' '))
-            shift 2
-        ;;
         -h|--help)
             usage
             exit 0
+        ;;
+        -s|--style)
+            style="$2"
+            shift 2
         ;;
         *)
             break
@@ -133,13 +82,26 @@ done
 
 
 # If color is enabled, set the colors and font
-if [ -z "${CPRINTF_DISABLE_COLOR}" ]; then
-    tput op
-    [ -n "${fg_color}" ] && tput setaf "${fg_color}"
-    [ -n "${bg_color}" ] && tput setab "${bg_color}"
-    for elt in ${font}; do
-        tput "${elt}"
-    done
+if [ -z "${CPRINTF_DISABLE_COLOR}" -a -n "${style}" -a -n "${STYLES}" ]; then
+    # Look up the style
+    line=$(echo "${STYLES}" | tr ';' '\n' | grep -m 1 "^${style} ")
+    if [ -n "${line}" ]; then
+        fg_color=$(echo "${line}" | awk '{print $2}')
+        bg_color=$(echo "${line}" | awk '{print $3}')
+        font=$(echo "${line}" | awk '{print $4}' | tr ',' ' ')
+
+        tput op
+        [ -n "${fg_color}" -a "${fg_color}" != "-" ] && tput setaf "${fg_color}"
+        [ -n "${bg_color}" -a "${bg_color}" != "-" ] && tput setab "${bg_color}"
+        for elt in ${font}; do
+            if [ -n "${elt}" -a "${elt}" != "-" ]; then
+                tput "${elt}"
+            fi
+        done
+    else
+        # Undefined style requested: do nothing
+        style=
+    fi
 fi
 
 
@@ -151,7 +113,7 @@ fi
 
 
 # Clean up and reset the font and colors to defaults, to avoid surprises later
-if [ -z "${CPRINTF_DISABLE_COLOR}" ]; then
+if [ -z "${CPRINTF_DISABLE_COLOR}" -a -n "${style}" -a -n "${STYLES}" ]; then
     tput op
     tput sgr0
 fi
