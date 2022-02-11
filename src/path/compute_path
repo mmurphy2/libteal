@@ -1,0 +1,128 @@
+#!/bin/dash
+#
+# Compute a path given a starting path an a specification, which can be a
+# relative path, an absolute path, or a URL.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+# TODO clean up and generalize this approach
+# If GPG signature verification was requested, download the signature file (if necessary) and verify.
+if [ -n "${gpgcheck}" ]; then
+    # First, figure out if we're changing the extension or just appending to get the signature URL. Also
+    # compute the output filename for the signature file.
+    sigfile=
+    sigurl=$(dirname "${url}")
+    urlbase=$(basename "${url}")
+    specpath=$(dirname "${gpgspec}")
+    specbase=$(basename "${gpgspec}")
+    outdir=$(dirname "${out_path}")
+    outbase=$(basename "${have_file}")
+    if echo "${specbase}" | grep -q '^\.%'; then
+        suffix=$(echo "${specbase}" | sed 's/^\.%//')
+        urlbase=$(echo "${urlbase}" | rev | cut -d '.' -f 2- | rev)
+        outbase=$(echo "${outbase}" | rev | cut -d '.' -f 2- | rev)
+        urlbase="${urlbase}.${suffix}"
+        outbase="${outbase}.${suffix}"
+    elif echo "${specbase}" | grep -q '^\.'; then
+        suffix=$(echo "${specbase}" | sed 's/^\.//')
+        urlbase="${urlbase}.${suffix}"
+        outbase="${outbase}.${suffix}"
+    else
+        urlbase="${specbase}"
+        outbase="${outbase}.asc"
+    fi
+
+    # Check to determine if the signature URL is on another host or in a different directory
+    if echo "${specpath}" | grep -q '://'; then
+        # On an entirely different host
+        sigurl="${gpgspec}"
+        sigfile="${outdir}/${outbase}"
+    elif [ "${specpath}" != "." ]; then
+        # Another directory on the same host
+        if echo "${url}" | grep -q '://'; then
+            if echo "${specpath}" | grep -q '^/'; then
+                # Absolute path on a remote host: need to reassemble from the scheme and host parts of the URL
+                scheme=$(echo "${url}" | awk -F '://' '{print $1}')
+                host=$(echo "${url}" | awk -F '://' '{print $2}' | cut -d '/' -f 1)
+                sigurl="${scheme}://${host}${specpath}/${specbase}"
+                sigfile="${outdir}/${outbase}"
+            else
+                # A relative path on the remote host is relative to the current URL directory
+                urlpath=$(dirname "${url}")
+                sigurl="${urlpath}/${specpath}/${specbase}"
+                sigfile="${outdir}/${outbase}"
+            fi
+        else
+            if echo "${specpath}" | grep -q '^/'; then
+                # Absolute path on the local file system
+                sigurl=
+                sigfile="${specpath}/${outbase}"
+            else
+                # Path relative to the url file (which is really a filename and not a URL at this point)
+                urlpath=$(dirname "${url}")
+                sigfile="${urlpath}/${specpath}/${outbase}"
+                sigurl=
+            fi
+        fi
+    else
+        # Simple case: signature file is in the same directory as the original URL
+        sigurl="${sigurl}/${urlbase}"
+        sigfile="${out_path}/${outbase}"
+        if [ "${have_file}" != "${out_path}" ]; then
+            # The original file was on the local filesystem, so we expect the signature file to be there as well
+            sigfile="${sigurl}"
+        fi
+    fi
+
+    # Obtain the signature file, if necessary
+    if [ ! -f "${sigfile}" ]; then
+        if echo "${sigurl}" | grep -q '^/'; then
+            # Local file: be sure it's there
+            if [ -f "${sigurl}" ]; then
+                if [ "${sigurl}" != "${sigfile}" ]; then
+                    cp -v "${sigurl}" "${sigfile}" >&2 || exit 3
+                fi
+            else
+                echo "GPG file not found: ${sigurl}" >&2
+                exit 3
+            fi
+        else
+            # Remote file
+            echo "Downloading ${sigurl}..."
+            curl -o "${sigfile}" "${sigurl}" >&2 || exit 3
+        fi
+    fi
+
+    if [ -n "${gpghome}" ]; then
+        gpg2 --homedir "${gpghome}" --verify "${sigfile}" "${have_file}" >&2
+        result=$?
+    else
+        gpg2 --verify "${sigfile}" "${have_file}" >&2
+        result=$?
+    fi
+
+    if [ ${result} -ne 0 ]; then
+        echo "GPG verification failed: ${have_file}" >&2
+        exit 3
+    fi
+fi
+
