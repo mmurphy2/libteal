@@ -1,8 +1,8 @@
 #!/bin/dash
 #
-# Abstract front-end script for fetching a file using curl(1), wget(1), or
-# wget2(1) and producing a clean file-based interface for transfer status.
-# This command is designed to be run in the background.
+# Abstract front-end script for fetching a file using curl(1) or wget(1),
+# producing a clean file-based interface for transfer status. This command is
+# designed to be run in the background.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -40,9 +40,3 @@ wrap_wget() {
     # grep '%' whatever.log | awk '{ for (i = 1; i <= NF; i++) { if ($i ~ /%$/) { print $i } } }'
 }
 
-
-# wrap_wget2 <URL> <output_file>
-wrap_wget2() { # TODO: put stats-site into a temporary file
-    wget2 -O "$2" --progress=bar --force-progress --stats-site=csv:- "$1" 2>&1 | tr '\033' '\n'
-    # cat whatever.log | grep '%' | awk '{ for (i=1; i<=NF; i++) { if ($i ~ /[0-9]+%/) { print $i } }}'
-}
