@@ -2,7 +2,7 @@
 #
 # Abstract front-end script for fetching a file using curl(1) or wget(1),
 # producing a clean file-based interface for transfer status. This command is
-# designed to be run in the background.
+# designed to be run in the background and is intended for script use.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -25,18 +25,187 @@
 # IN THE SOFTWARE.
 
 
-# wrap_curl <URL> <output_file>
+usage() {
+    cat << EOF
+$0 [options] <URL> <output_file>
+
+Options:
+    -b <backend> | --backend <backend>
+        Use the specified <backend> instead of performing automatic detection
+        of the backend. Supported backends are curl and wget. By default,
+        curl is used if it is available; otherwise, wget will be used.
+    -d <directory> | --status-directory <directory>
+        Write download status files to <directory> instead of creating a new
+        temporary directory.
+    -h | --help
+        Display this message and exit.
+
+This program is designed to download a file from a remote <URL> and save it
+to <output_file>, while running as a background process. Download status
+information is saved to a status directory, which will be a newly created
+temporary directory by default. However, the status directory may be specified
+with the -d option.
+
+Within the status directory, several files will be created:
+    dest
+        Contains the value of <output_file>
+    log
+        Contains the raw output from the file transfer backend, which may be
+        used to troubleshoot errors.
+    percent
+        Contains lines indicating the percentage of the download completed
+        thus far. Each line is an integer number without a trailing % sign.
+    pid
+        Contains the process ID of this program.
+    remain
+        Contains lines indicating the estimated number of seconds remaining
+        in the download process. Each line is a plain integer number.
+    response
+        When available (varies by backend and protocol), the response code
+        sent by the server is stored in this file.
+    status
+        Once the download backend has finished, its exit status is recorded
+        in this file.
+    url
+        Contains the value of <URL>
+
+By default, curl(1) will be used as the file transfer backend, with wget(1)
+utilized as a fallback. This behavior may be overridden with the -b option
+or by setting the FETCH_URL_BACKEND environment variable. The -b option
+overrides the environment variable.
+
+Before the download begins, the path to the status directory will be sent to
+standard output. No other output is produced, and only error messages from
+fetch_url itself are send to standard error. Errors produced by the backend
+will be saved in the log file. This program is intended for use by scripts
+that need to be able to handle status information in a consistent manner.
+EOF
+}
+
+
+# wrap_curl <URL> <output_file> <percent_file> <remain_file> <response_file>
+#
+# Wraps curl(1), coerces the status output into a usable form, logs the status output, and
+# processes the status output into the destination files.
+#
 wrap_curl() {
-    curl -o "$2" "$1" 2>&1 | tr '\r' '\n'
-    # Filter TODO
-    # cat firefox.log | tr '\r' '\n' | awk '/^[0-9]/ { print $3 }'
+    curl --fail -o "$2" -w "RESPONSE: %{response_code}\n" "$1" 2>&1 | tr '\r' '\n' | \
+        tee "${tempdir}/log" | \
+        awk -f "${whereami}/fetch_url.awk" -v mode=curl -v percent="$3" -v remain="$4" \
+            -v response="$5"
 }
 
 
-# wrap_wget <URL> <output_file>
+# wrap_wget <URL> <output_file> <percent_file> <remain_file> <response_file>
+#
+# Wraps wget(1), logging and processing the status output.
+#
 wrap_wget() {
-    wget -O "$2" --progress=dot "$1"
-    # Filter TODO
-    # grep '%' whatever.log | awk '{ for (i = 1; i <= NF; i++) { if ($i ~ /%$/) { print $i } } }'
+    wget -O "$2" --progress=dot "$1" | \
+        tee "${tempdir}/log" | \
+        awk -f "${whereami}/fetch_url.awk" -v mode=wget -v percent="$3" -v remain="$4" \
+            -v response="$5"
 }
 
+
+self=$(readlink -e "$0")
+whereami=$(dirname "${self}")
+
+
+tempdir=
+case "$1" in
+    -b|--backend)
+        FETCH_URL_BACKEND="$2"
+        shift 2
+    ;;
+    -d|--status-directory)
+        tempdir="$2"
+        shift 2
+    ;;
+    -h|--help)
+        usage
+        exit 0
+    ;;
+esac
+
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 [options] <URL> <output_file>" >&2
+    exit 2
+fi
+
+
+backend=
+if [ -n "${FETCH_URL_BACKEND}" ]; then
+    # If FETCH_URL_BACKEND is set, assume the user wants to pick the backend. However, verify
+    # that their selection is both supported and installed on the system.
+    case "${FETCH_URL_BACKEND}" in
+        curl)
+            if which curl >/dev/null 2>&1; then
+                backend=wrap_curl
+            else
+                echo "curl not found" >&2
+                echo "(check FETCH_URL_BACKEND environment variable or -b option)" >&2
+                exit 1
+            fi
+        ;;
+        wget)
+            if which wget >/dev/null 2>&1; then
+                backend=wrap_wget
+            else
+                echo "wget not found" >&2
+                echo "(check FETCH_URL_BACKEND environment variable or -b option)" >&2
+                exit 1
+            fi
+        ;;
+        *)
+            echo "Unsupported backend: ${FETCH_URL_BACKEND}" >&2
+            echo "(check FETCH_URL_BACKEND environment variable or -b option)" >&2
+            exit 1
+        ;;
+    esac
+else
+    # Absent a user choice, try curl, then fall back to wget.
+    if which curl >/dev/null 2>&1; then
+        backend=wrap_curl
+    elif which wget >/dev/null 2>&1; then
+        backend=wrap_wget
+    else
+        echo "Neither curl nor wget is available" >&2
+        exit 1
+    fi
+fi
+
+
+# Create or verify the status output directory
+if [ -z "${tempdir}" ]; then
+    tempdir=$(mktemp -d)
+else
+    if [ ! -d "${tempdir}" ]; then
+        echo "Directory not found: ${tempdir}" >&2
+        exit 1
+    fi
+fi
+
+
+# Write the URL and output_file to the status directory, in case the outer script loses track
+# of the pid. Also write this script's pid to the status directory for good measure.
+echo "$1" > "${tempdir}/url"
+echo "$2" > "${tempdir}/dest"
+echo $$ > "${tempdir}/pid"
+
+
+# This is normally our only output: the path to the temporary directory. Client scripts will use
+# the various files in this status directory to track the download.
+echo "${tempdir}"
+
+
+# It's a bit anticlimactic now, but run the backend.
+${backend} "$1" "$2" "${tempdir}/percent" "${tempdir}/remain" "${tempdir}/response"
+status=$?
+
+
+# Write the backend status then exit with that same status. This way, a client script has several
+# choices for checking for a successful download.
+echo "${status}" > "${tempdir}/status"
+exit ${status}
