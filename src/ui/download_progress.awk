@@ -1,5 +1,7 @@
 #!/usr/bin/awk
 #
+# TODO: drop curl support, parse progress to draw bar
+#
 # Parser for command output from curl(1) and wget(1). This parser must be
 # invoked with 4 variables set from the command line (with the -v option):
 #
