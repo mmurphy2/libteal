@@ -1,11 +1,8 @@
 #!/usr/bin/awk
 #
-# TODO: drop curl support, parse progress to draw bar
+# Parser for log data from wget(1). This parser supports 3 variables set
+# from the command line (with the -v option):
 #
-# Parser for command output from curl(1) and wget(1). This parser must be
-# invoked with 4 variables set from the command line (with the -v option):
-#
-#     mode              One of: curl wget
 #     percent           Path to percentage output file
 #     remain            Path to time remaining output file
 #     response          Path to response code output file
@@ -16,12 +13,6 @@
 # format using integer numbers of seconds remaining. Finally, the response
 # code output file contains the response code(s) associated with the
 # request. In the case of directs, multiple response codes may be present.
-#
-# To retrieve the response code from a curl(1) request, add:
-#
-#    -w "RESPONSE: %{response_code}\n"
-#
-# to the curl command line.
 #
 #
 # Copyright 2022 Coastal Carolina University
@@ -52,14 +43,9 @@
 #
 function parse_time(timestr,    count, pieces, seconds)
 {
-    if (mode == "wget") {
-        # Remove the trailing "s" to avoid having an empty piece at the end
-        sub(/s$/, "", timestr)
-        count = split(timestr, pieces, /[hm]/)
-    }
-    else {
-        count = split(timestr, pieces, ":")
-    }
+    # Remove the trailing "s" to avoid having an empty piece at the end
+    sub(/s$/, "", timestr)
+    count = split(timestr, pieces, /[hm]/)
 
     seconds = pieces[count]
     if (count >= 2) {
@@ -73,65 +59,20 @@ function parse_time(timestr,    count, pieces, seconds)
 }
 
 
-BEGIN {
-    # Check that all required externally set variables have been set.
-
-    if (mode == "") {
-        print "FATAL: Variable 'mode' was not set with -v" > "/dev/stderr"
-        exit 2
-    }
-
-    if (percent == "") {
-        print "FATAL: Variable 'percent' was not set with -v" > "/dev/stderr"
-        exit 2
-    }
-
-    if (remain == "") {
-        print "FATAL: Variable 'remain' was not set with -v" > "/dev/stderr"
-        exit 2
-    }
-
-    if (response == "") {
-        print "FATAL: Variable 'response' was not set with -v" > "/dev/stderr"
-        exit 2
-    }
-}
-
 
 /^HTTP request sent, awaiting response/ {
-    if (mode == "wget") {
-        print $6 > response
-    }
-}
-
-
-/^RESPONSE: / {
-    # By default, curl(1) doesn't display a response code. However, one can easily be added to
-    # the output with the command line option: -w "RESPONSE: %{response_code}\n"
-    if (mode == "curl") {
-        print $2 > response
-    }
-}
-
-
-/^[ \t]*[0-9]/ {
-    if (mode == "curl") {
-        print $3 > percent
-        print parse_time($11) > remain
-    }
+    print $6 > response
 }
 
 
 /%/ {
-    if (mode == "wget") {
-        # The field containing the percentage value may vary, depending on how many dots were
-        # printed on the line.
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /%$/) {
-                sub(/%$/, "", $i)
-                print $i > percent
-                print parse_time($(i + 2)) > remain
-            }
+    # The field containing the percentage value may vary, depending on how many dots were
+    # printed on the line.
+    for (i=1; i<=NF; i++) {
+        if ($i ~ /%$/) {
+            sub(/%$/, "", $i)
+            print $i > percent
+            print parse_time($(i + 2)) > remain
         }
     }
 }
