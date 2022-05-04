@@ -1,0 +1,47 @@
+#!/bin/dash
+#
+# curl progress parser
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <status_directory>" >&2
+    exit 1
+fi
+
+
+percent=
+remain=
+received=
+total=
+
+# TODO: for efficiency, this should be moved over to awk
+# TODO: output sizes need to be in bytes; times in seconds
+if [ -f "$1/progress" ]; then
+    data=$(tail -n 1 "$1/progress")
+    total=$(echo "${data}" | awk '{print $2}')
+    percent=$(echo "${data}" | awk '{print $3}')
+    received=$(echo "${data}" | awk '{print $4}')
+    remain=$(echo "${data}" | awk '{print $11}')
+fi
+
+echo "${percent}:${remain}:${received}:${total}"
