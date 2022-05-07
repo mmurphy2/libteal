@@ -1,15 +1,6 @@
-#!/bin/dash
+#!/usr/bin/awk
 #
-# Parses a curl progress log, producing a set of output files.
-#
-# TODO fix
-#
-# percent:remain:total:speed
-#
-# where percent is the integer percentage remaining (-1 if unknown or
-# missing), remain is the remaining transfer time in seconds, total is the
-# size of the download in bytes (if known), and speed is the current
-# transfer speed in bytes per second.
+# curl progress parser
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -32,15 +23,9 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <status_file>" >&2
-    exit 1
-fi
-
-
-whatami=$(readlink -e $0)
-whereami=$(dirname "${whatami}")
-
-if [ -f "$1" ]; then
-    cat "$1" | tr '\r' '\n' | tail -n 1 | awk -f "${whereami}/progress.awk" -f "${whereami}/curl_progress.awk"
-fi
+(NF == 12) {
+    total = to_bytes($2)
+    percent = $3
+    remain = to_seconds($11)
+    speed = to_bytes($12)
+}
