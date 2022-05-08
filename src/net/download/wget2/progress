@@ -1,6 +1,6 @@
-#!/usr/bin/awk
+#!/bin/dash
 #
-# curl progress parser
+# wget2 progress extraction
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -22,10 +22,4 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-
-(NF == 12) {
-    total = to_bytes($2)
-    percent = $3
-    remain = to_seconds($11)
-    speed = to_bytes($12)
-}
+cat wget2.progress | sed -e 's/[^[:print:]]//g' -e 's~/s87~~g' -e 's/\[[A-Z0-9]*//g' -e 's/data/\n/g' -e 's/iles/\n/' -e 's/\]//g' -e 's/=//g' -e 's/>//g' -e 's/iles:/\n/'

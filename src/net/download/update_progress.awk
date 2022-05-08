@@ -64,33 +64,20 @@ function to_seconds(time) {
 }
 
 
-BEGIN {
-    if (percent_file == "") {
-        percent_file = "/tmp/percent"
-    }
-    if (remain_file == "") {
-        remain_file = "/tmp/remain"
-    }
-    if (speed_file == "") {
-        speed_file = "/tmp/speed"
-    }
-    if (total_file == "") {
-        total_file = "/tmp/total"
-    }
-}
-
-
 END {
-    if (percent != "") {
+    if (percent != "" && percent_file != "") {
         printf("%d\n", percent) > percent_file
     }
-    if (remain != "") {
+    if (remain != "" && remain_file != "") {
         printf("%d\n", remain) > remain_file
     }
-    if (total != "") {
+    if (speed != "" && speed_file != "") {
+        printf("%f\n", speed) > speed_file
+    }
+    if (total != "" && total_file != "") {
         printf("%d\n", total) > total_file
     }
-    if (speed != "") {
-        printf("%f\n", speed) > speed_file
+    if (transferred != "" && transferred_file != "") {
+        printf("%d\n", transferred) > transferred_file
     }
 }

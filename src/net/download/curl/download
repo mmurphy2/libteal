@@ -29,8 +29,7 @@ if [ $# -ne 3 ]; then
 fi
 
 
-http_code=$(curl -w '%{http_code}\n' -f -o "$3" "$2" 2>"$1/progress")
+curl -w '%{http_code}\n' -f -o "$3" "$2" 2>"$1/progress.log" > "$1/http_code"
 status=$?
 
-[ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
 echo "${status}" > "$1/result"

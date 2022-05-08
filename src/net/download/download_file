@@ -1,0 +1,165 @@
+#!/bin/dash
+#
+# Downloads a single file, selecting a download mechanism based on the URL
+# scheme and available backends.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
+
+whatami=$(readlink -e "$0")
+whereami=$(dirname "${whatami}")
+
+
+usage() {
+    cat << EOF
+$0 [options] <URL> <output_path>
+
+Options:
+    -h | --help
+        Show this help message and exit.
+    -s <dir> | --status <dir>
+        Use the specified directory for status files. Otherwise, a temporary
+        directory is created with mktemp(1).
+
+Downloads the requested file from <URL>, saving it to <output_path>. if the
+<output_path> is a directory, then the filename from the <URL> is used as
+the destination file within the directory. Upon starting the download, the
+status directory path is printed on standard output.
+
+The status directory contains information about the ongoing download. Each
+download backend writes status information specific to the download tool.
+Client code should run this program as a background task and periodically call
+the update_progress script to parse the tool-specific status into a common
+format that is useful for monitoring download progress.
+
+File downloads are accomplished using a backend (such as curl or wget). The
+backend search order can be controlled by setting the LIBTEAL_DOWNLOAD_BACKENDS
+environment variable, which defaults to trying each supported backend in
+lexical order.
+
+Note that a backend must support the URL scheme and be installed on the system
+in order to be used. The first matching backend in the search order will be
+used for the download. If no suitable backend is available, an error will
+occur, and nothing will be downloaded.
+
+Supported backends (if installed on this system) are:
+EOF
+
+    find "${whereami}" -type d -mindepth 1 -maxdepth 1 -printf ' * %f\n'
+}
+
+
+status_output=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+        ;;
+        -s|--status)
+            status_output="$1"
+            shift 2
+        ;;
+    esac
+done
+
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 [options] <URL> <output_path>" >&2
+    exit 2
+fi
+
+
+url="$1"
+out_path="$2"
+
+if [ -d "${out_path}" ]; then
+    out_path=$(echo "${out_path}" | sed 's|/*$||')
+    base_name=$(basename "${url}")
+    out_path="${out_path}/${base_name}"
+fi
+
+
+# Quick sanity check for the output path:
+parent=$(dirname "${out_path}")
+if [ ! -d "${parent}" ]; then
+    echo "Directory not found: ${parent}" >&2
+    exit 1
+fi
+
+
+# Determine the URL scheme and locate a suitable backend
+if [ -z "${LIBTEAL_DOWNLOAD_BACKENDS}" ]; then
+    LIBTEAL_DOWNLOAD_BACKENDS=$(find "${whereami}" -type d -mindepth 1 -maxdepth 1 -printf '%f ')
+fi
+
+if ! echo "${url}" | grep -q "://"; then
+    echo "Invalid URL (missing scheme): ${url}" >&2
+    exit 1
+fi
+
+scheme=$(echo "${url}" | awk -F '://' '{print tolower($1)}')
+backend=
+for item in $(echo "${LIBTEAL_DOWNLOAD_BACKENDS}"); do
+    if [ -d "${whereami}/${item}" ]; then
+        if "${whereami}/${item}/available" "${scheme}"; then
+            backend="${item}"
+            break
+        fi
+    fi
+done
+
+
+# Be sure we have a backend before proceeding
+if [ -z "${backend}" ]; then
+    echo "No suitable backend found for scheme ${scheme}" >&2
+    echo "Tried ${LIBTEAL_DOWNLOAD_BACKENDS}" >&2
+    exit 1
+fi
+
+
+# Create a temporary status directory if -s wasn't used
+if [ -z "${status_output}" ]; then
+    status_output=$(mktemp -d)
+elif [ ! -d "${status_output}" ]; then
+    echo "Directory not found: ${status_output}" >&2
+    exit 1
+fi
+echo "${status_output}"
+
+
+# Test write permissions by writing the backend name into the status directory
+echo "${backend}" > "${status_output}/backend" || exit 1
+
+
+# Now the actual downloading bit
+"${whereami}/${backend}/download" "${status_output}" "${url}" "${out_path}"
+status=$?
+
+
+# If the download failed, clean up the partial file
+if [ ${status} -ne 0 ]; then
+    rm -f "${out_path}"
+    exit 1
+fi
+
+
+exit ${status}
