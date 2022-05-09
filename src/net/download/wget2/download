@@ -23,16 +23,24 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 3 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file>" >&2
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
     exit 1
 fi
 
 
-wget2 --stats-site="csv:$1/stats" --progress=bar --force-progress -O "$3" "$2" > "$1/progress"
+if [ -n "$4" ]; then
+    export http_proxy="$4"
+    export https_proxy="$4"
+fi
+
+wget2 --stats-site="csv:$1/stats.log" --progress=bar --force-progress -O "$3" "$2" > "$1/progress.log"
 status=$?
 
-http_code=$(tail -n 1 "$1/stats" | awk -F ',' '{print $4}')
-
+http_code=$(tail -n 1 "$1/stats.log" | awk -F ',' '{print $4}')
 [ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
+
+# Write the definitive total transfer, which is only available from wget2 after the operation has completed
+tail -n 1 "$1/stats.log" | awk -F ',' '{print $7}' > "$1/total"
+
 echo "${status}" > "$1/result"

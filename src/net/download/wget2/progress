@@ -1,6 +1,6 @@
 #!/bin/dash
 #
-# wget2 progress extraction
+# wget2 progress extractor
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -22,4 +22,11 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-cat wget2.progress | sed -e 's/[^[:print:]]//g' -e 's~/s87~~g' -e 's/\[[A-Z0-9]*//g' -e 's/data/\n/g' -e 's/iles/\n/' -e 's/\]//g' -e 's/=//g' -e 's/>//g' -e 's/iles:/\n/'
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <progress_file>" >&2
+    exit 1
+fi
+
+
+cat "$1" | sed -e 's/[^[:print:]]//g' -e 's~B/s~\n~g' | sed 's/[^[:space:]]* //' | grep '^ ' | tail -n 1 | sed 's/[=>]//g'

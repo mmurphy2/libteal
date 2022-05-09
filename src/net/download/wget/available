@@ -1,6 +1,7 @@
 #!/bin/dash
 #
-# Backend script that uses wget as a download mechanism.
+# Determines if wget(1) is available on the system and supports the specified
+# URL and proxy schemes.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -23,22 +24,22 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 4 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
-    exit 1
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <scheme> <proxy_scheme>"
 fi
 
+result=1
 
-if [ -n "$4" ]; then
-    export http_proxy="$4"
-    export https_proxy="$4"
-    export ftp_proxy="$4"
-fi
+case "$1" in
+    ftp|ftps|http|https)
+        case "$2" in
+            none|http|https)
+                if which wget >/dev/null 2>&1; then
+                    result=0
+                fi
+            ;;
+        esac
+    ;;
+esac
 
-wget -o "$1/progress.log" --report-speed=bits -O "$3" "$2"
-status=$?
-
-http_code=$(cat "$1/progress.log" | grep 'HTTP request sent, awaiting response...' | awk '{print $6}')
-[ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
-
-echo "${status}" > "$1/result"
+exit ${result}

@@ -1,6 +1,8 @@
-#!/bin/dash
+#!/usr/bin/awk
 #
-# Backend script that uses wget as a download mechanism.
+# wget2 progress line parser
+#
+# Depends on functions from update_progress.awk.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -23,22 +25,29 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 4 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
-    exit 1
-fi
+(NF == 5) {
+    sub("%", "", $1)
+    percent = $1
+    transferred = to_bytes($4)
+    speed = to_bytes($5)
 
+    # We have to calculate the total and estimate time remaining, since wget2 doesn't provide this output
+    if (percent + 0 < 1) {
+        # We just have a rough guess at the start of the process
+        if (transferred + 0 > 0) {
+            total = 100 * transferred
+        }
+    }
+    else {
+        # At 100%, don't update the total. We will get the definitive transfer total from the statistics file
+        # in the download wrapper.
+        if (percent + 0 < 100) {
+            total = transferred / (percent / 100)
+        }
+    }
 
-if [ -n "$4" ]; then
-    export http_proxy="$4"
-    export https_proxy="$4"
-    export ftp_proxy="$4"
-fi
-
-wget -o "$1/progress.log" --report-speed=bits -O "$3" "$2"
-status=$?
-
-http_code=$(cat "$1/progress.log" | grep 'HTTP request sent, awaiting response...' | awk '{print $6}')
-[ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
-
-echo "${status}" > "$1/result"
+    # Transfer time, assuming we have a total, can be calculated
+    if (total + 0 > transferred + 0 && speed + 0 > 0) {
+        remain = (total - transferred) / speed
+    }
+}

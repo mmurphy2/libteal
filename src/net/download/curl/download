@@ -23,13 +23,18 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 3 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file>" >&2
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
     exit 1
 fi
 
 
-curl -w '%{http_code}\n' -f -o "$3" "$2" 2>"$1/progress.log" > "$1/http_code"
-status=$?
+if [ -z "$4" ]; then
+    curl -w '%{http_code}\n' -f -o "$3" "$2" 2>"$1/progress.log" > "$1/http_code"
+    status=$?
+else
+    curl -w '%{http_code}\n' -x "$4" -f -o "$3" "$2" 2>"$1/progress.log" > "$1/http_code"
+    status=$?
+fi
 
 echo "${status}" > "$1/result"

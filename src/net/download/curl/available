@@ -1,7 +1,7 @@
 #!/bin/dash
 #
 # Determines if curl(1) is available on the system and supports the specified
-# URL scheme.
+# URL and proxy schemes.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -24,17 +24,21 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <scheme>"
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <scheme> <proxy_scheme>"
 fi
 
 result=1
 
 case "$1" in
     file|ftp|ftps|gopher|gophers|http|https|imap|imaps|mqtt|pop3|pop3s|rtmp|rtmps|rtsp|scp|sftp|smb|smbs|telnet|tftp)
-        if which curl >/dev/null 2>&1; then
-            result=0
-        fi
+        case "$2" in
+            none|http|https|socks4|socks4a|socks5|socks5h)
+                if which curl >/dev/null 2>&1; then
+                    result=0
+                fi
+            ;;
+        esac
     ;;
 esac
 

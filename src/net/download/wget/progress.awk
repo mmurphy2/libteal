@@ -1,6 +1,8 @@
-#!/bin/dash
+#!/usr/bin/awk
 #
-# Backend script that uses wget as a download mechanism.
+# wget progress line parser
+#
+# Depends on functions from update_progress.awk.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -23,22 +25,29 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 4 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
-    exit 1
-fi
+/^Length:/ {
+    total = $2
+    next
+}
 
+(NF == 3) {
+    sub("%", "", $2)
+    transferred = to_bytes($1)
+    percent = $2
+    count = split($3, pieces, "=")
+    if (count == 2) {
+        time = to_seconds(pieces[2])
+        if (total > 0) {
+            speed = total / time
+        }
+    }
+}
 
-if [ -n "$4" ]; then
-    export http_proxy="$4"
-    export https_proxy="$4"
-    export ftp_proxy="$4"
-fi
-
-wget -o "$1/progress.log" --report-speed=bits -O "$3" "$2"
-status=$?
-
-http_code=$(cat "$1/progress.log" | grep 'HTTP request sent, awaiting response...' | awk '{print $6}')
-[ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
-
-echo "${status}" > "$1/result"
+(NF == 4) {
+    sub("%", "", $2)
+    transferred = to_bytes($1)
+    percent = $2
+    # wget log output displays speeds with base units of bits
+    speed = to_bytes($3 / 8)
+    remain = to_seconds($4)
+}

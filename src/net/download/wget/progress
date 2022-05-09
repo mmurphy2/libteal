@@ -1,6 +1,6 @@
 #!/bin/dash
 #
-# Backend script that uses wget as a download mechanism.
+# Extracts the latest update line from a wget progress file.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -23,22 +23,13 @@
 # IN THE SOFTWARE.
 
 
-if [ $# -ne 4 ]; then
-    echo "Usage: $0 <status_directory> <URL> <output_file> <proxy_server>" >&2
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <progress_file>" >&2
     exit 1
 fi
 
 
-if [ -n "$4" ]; then
-    export http_proxy="$4"
-    export https_proxy="$4"
-    export ftp_proxy="$4"
+if [ -f "$1" ]; then
+    cat "$1" | grep "Length:"
+    cat "$1" | grep '%' | tail -n 1 | sed 's/[ \.]* / /g'
 fi
-
-wget -o "$1/progress.log" --report-speed=bits -O "$3" "$2"
-status=$?
-
-http_code=$(cat "$1/progress.log" | grep 'HTTP request sent, awaiting response...' | awk '{print $6}')
-[ -n "${http_code}" ] && echo "${http_code}" > "$1/http_code"
-
-echo "${status}" > "$1/result"

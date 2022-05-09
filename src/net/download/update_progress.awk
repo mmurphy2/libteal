@@ -48,15 +48,42 @@ function to_bytes(size) {
 
 
 function to_seconds(time) {
-    result = -1
+    result = 0
 
     count = split(time, parts, ":")
     if (count == 3) {
-        if (parts[1] == "--") {
-            result = 0
-        }
-        else {
+        # curl-style time
+        if (parts[1] != "--") {
             result = 3600*parts[1] + 60*parts[2] + parts[3]
+        }
+    }
+    else {
+        # wget-style time
+        num = ""
+
+        split(time, pieces, //)
+        for (key in pieces) {
+            piece = pieces[key]
+            if (match(piece, /[0-9]/)) {
+                # Concatenate successive digits to rebuild numbers
+                num = num piece
+            }
+            else {
+                if (piece == "h") {
+                    result += 3600 * num
+                }
+                else if (piece == "m") {
+                    result += 60 * num
+                }
+                else if (piece == "s") {
+                    result += num
+                }
+                num = ""
+            }
+        }
+
+        if (num != "") {
+            result += num
         }
     }
 
@@ -72,7 +99,7 @@ END {
         printf("%d\n", remain) > remain_file
     }
     if (speed != "" && speed_file != "") {
-        printf("%f\n", speed) > speed_file
+        printf("%d\n", speed) > speed_file
     }
     if (total != "" && total_file != "") {
         printf("%d\n", total) > total_file
