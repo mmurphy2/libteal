@@ -1,10 +1,13 @@
 #!/bin/dash
 #
+# TODO: consider whether or not this design makes sense
+# TODO: if keeping, migrate from fetch_file to download_file
+#
 # Resolves a file by finding it locally or downloading it, possibly using a
 # set of mirror servers. Optionally verifies the file using a detached GPG
 # signature and/or checksum.
 #
-# NOTE: This script depends on the libteal scripts net/fetch_file,
+# NOTE: This script depends on the libteal scripts net/download_file,
 # crypto/verify_hash, crypto/verify_signature, and path/normpath.
 #
 # Copyright 2022 Coastal Carolina University
@@ -110,7 +113,7 @@ topdir=$(dirname "${whereami}")
 
 
 # A few aliases to make things cleaner:
-alias fetch_file="${whereami}/fetch_file"
+alias download_file="${whereami}/download_file"
 alias normpath="${topdir}/path/normpath"
 alias verify_hash="${topdir}/crypto/verify_hash"
 alias verify_signature="${topdir}/crypto/verify_signature"

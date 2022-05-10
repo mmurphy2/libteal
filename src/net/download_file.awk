@@ -1,6 +1,6 @@
 #!/usr/bin/awk
 #
-# Common progress parser (used in conjunction with a backend parser)
+# curl download progress parser
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -24,16 +24,20 @@
 
 
 function to_bytes(size) {
+    # Mapping of prefixes to corresponding powers of two
     table["K"] = 10
     table["M"] = 20
     table["G"] = 30
     table["T"] = 40
+    table["P"] = 50
     result = ""
 
+    # A bare number without a suffix is just a number of bytes
     if (size ~ /^[0-9\.]+$/) {
         result = size
     }
     else {
+        # Separate the numeric portion from the suffix
         suffix = size
         gsub(/[^0-9\.]/, "", size)
         sub(size, "", suffix)
@@ -50,40 +54,12 @@ function to_bytes(size) {
 function to_seconds(time) {
     result = 0
 
+    # curl provides its time output in H:MM:SS format, but we store the result in raw seconds,
+    # since it is easier to do computations on seconds (and simple to convert back later if needed)
     count = split(time, parts, ":")
     if (count == 3) {
-        # curl-style time
         if (parts[1] != "--") {
             result = 3600*parts[1] + 60*parts[2] + parts[3]
-        }
-    }
-    else {
-        # wget-style time
-        num = ""
-
-        split(time, pieces, //)
-        for (key in pieces) {
-            piece = pieces[key]
-            if (match(piece, /[0-9]/)) {
-                # Concatenate successive digits to rebuild numbers
-                num = num piece
-            }
-            else {
-                if (piece == "h") {
-                    result += 3600 * num
-                }
-                else if (piece == "m") {
-                    result += 60 * num
-                }
-                else if (piece == "s") {
-                    result += num
-                }
-                num = ""
-            }
-        }
-
-        if (num != "") {
-            result += num
         }
     }
 
@@ -91,7 +67,26 @@ function to_seconds(time) {
 }
 
 
+# Matches the curl status line, which has 12 fields. The curl progress output looks like this:
+#
+#   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+#                                  Dload  Upload   Total   Spent    Left  Speed
+# 100   672  100   672    0     0   6549      0 --:--:-- --:--:-- --:--:--  6588
+#
+# Only the data line should be sent as input here (e.g. run through tail -n 1 first).
+(NF == 12) {
+    total = to_bytes($2)
+    percent = $3
+    transferred = to_bytes($4)
+    remain = to_seconds($11)
+    speed = to_bytes($12)
+}
+
+
 END {
+    # Write each requested file, assuming the corresponding variable has been set to a value.
+    # The _file variables are set by invoking this awk script with the -v option for each
+    # variable to be set.
     if (percent != "" && percent_file != "") {
         printf("%d\n", percent) > percent_file
     }
