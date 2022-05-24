@@ -32,6 +32,10 @@ $0 [options] [[ini_file] ...]
 Options:
     -h | --help
         Show this help message and exit.
+    -i | --no-interpolation
+        Disable variable interpolation.
+    -m | --parameterized-sections
+        Enable section parameterization.
     -o <directory> | --output <directory>
         Use <directory> for output instead of creating one with mktemp(1).
     -p section/key=value | --preload section/key=value
@@ -88,6 +92,8 @@ libteal_top=$(dirname "${whereami}")
 
 preload=
 output=
+interpolation=1
+parameterize=0
 underscores=1
 
 while [ $# -ne 0 ]; do
@@ -95,6 +101,14 @@ while [ $# -ne 0 ]; do
         -h|--help)
             usage
             exit 0
+        ;;
+        -i|--no-interpolation)
+            interpolation=0
+            shift
+        ;;
+        -m|--parameterized-sections)
+            parameterize=1
+            shift
         ;;
         -o|--output)
             output="$2"
@@ -144,6 +158,8 @@ echo "${preload}" > "${preload_file}"
 
 # Awk does the heavy lifting here
 awk \
+    -v interpolation=${interpolation} \
+    -v parameterized_sections=${parameterize} \
     -v underscores=${underscores} \
     -v output_directory="${output}" \
     -f "${libteal_top}/path/cleanpath.awk" \

@@ -24,11 +24,101 @@
 #
 
 
+# Recursive resolver for variable interpolation. Supports both direct and indirect variable
+# lookups (${foo} and ${${foo}}).
+#
+# Called using: resolve_symbols(value, this_section)
+#
+# where value is the right hand side of an assignment, while this_section is the name of
+# the section in which the key=value assignment occurs. When resolving variables, unqualified
+# variable names (those that do not contain a /) are first resolved using other keys from the
+# same section. Global (unsectioned) keys are checked if no matching key exists in this section.
+# An unresolved variable is replaced by an empty string.
+#
+function resolve_symbols(value, this_section,  _check, _endex, _index, _infix, _prefix, _result, _suffix) {
+    _index = index(value, "${")
+
+    if (_index) {
+        # The prefix is everything to the left of the ${. Eventually, the infix will be the contents
+        # of the variable, while the suffix will be everything to the right of the closing }. The
+        # endex is the index of the next } (hence the pun).
+        _prefix = substr(value, 1, _index - 1)
+        _infix = substr(value, _index + 2)
+        _endex = index(_infix, "}")
+
+        # It is possible (though probably not that useful) for variables to be nested, allowing for
+        # indirect references within the INI file. In this case, we need to make a recursive call to
+        # process the nested variable. The endex needs to be recomputed once the infix has been
+        # updated by the recursive call.
+        _check = index(_infix, "${")
+        if (_check > 0 && _check < _endex) {
+            _infix = resolve_symbols(_infix)
+            _endex = index(_infix, "}")
+        }
+
+        if (_endex) {
+            # Separate the suffix from the infix using the position of the }
+            _suffix = substr(_infix, _endex + 1)
+            _infix = substr(_infix, 1, _endex - 1)
+
+            # If the infix, which is now the variable name, contains a slash, we assume that it is
+            # a fully-qualified reference to a key in a section. Look up and substitute directly. If
+            # there is no match, replace the variable with an empty string.
+            if (index(_infix, "/")) {
+                if (_infix in symbol_table) {
+                    _infix = symbol_table[_infix]
+                }
+                else {
+                    _infix = ""
+                }
+            }
+            else {
+                # For a variable name that does not contain a slash, first look in the current
+                # section to see if we have a key with the same name. If so, use that key. Otherwise,
+                # see if a matching key exists at the global (unsectioned) level. Failing both lookups,
+                # replace the variable with an empty string.
+                if (this_section "/" _infix in symbol_table) {
+                    _infix = symbol_table[this_section "/" _infix]
+                }
+                else {
+                    if (_infix in symbol_table) {
+                        _infix = symbol_table[_infix]
+                    }
+                    else {
+                        _infix = ""
+                    }
+                }
+            }
+
+            # Recursively resolve any remaining variables in the suffix portion of the value. The
+            # final result is then the prefix, infix, and suffix concatenated.
+            _suffix = resolve_symbols(_suffix)
+            _result = _prefix _infix _suffix
+        }
+        else {
+            # endex was zero: no closing }. All we can do is try to save the prefix.
+            print FILENAME ": Unterminated variable at line " NR > "/dev/stderr"
+            _result = prefix
+        }
+    }
+    else {
+        # No variables, so return the original value unchanged
+        _result = value
+    }
+
+    return _result
+}
+
+
 BEGIN {
     have_error = 0
     section = ""
     indent = 0
     last_key = ""
+
+    if (interpolation == "") {
+        interpolation = 1
+    }
 }
 
 /^[ \t]*$/ {
@@ -47,6 +137,15 @@ BEGIN {
     sub(/^[ \t]*/, "", $0)
     section = tolower(substr($0, 2, length($0) - 2))
     sub(/^[ \t]*/, "", section)
+    sub(/[ \t]*$/, "", section)
+
+    # If section parameterization is enabled, replace the first space or tab in the section name
+    # (if any) with a slash. This feature enables different sections to be grouped under a single
+    # hierarchy in the output.
+    if (parameterized_sections) {
+        sub(/[ \t]/, "/", section)
+    }
+
     next
 }
 
@@ -86,38 +185,21 @@ BEGIN {
             }
 
             # Compute the symbol table key
-            this_key = section "/" pieces[1]
-            if (section == "") {
-                this_key = pieces[1]
+            this_key = pieces[1]
+            if (section != "" && index(this_key, "/") != 1) {
+                this_key = section "/" pieces[1]
             }
+            sub(/^\/+/, "", this_key)
+
+            # It is possible for a key to contain slashes (and therefore define sections). For variable
+            # substitution purposes, we need to get the effective section from the key itself.
+            effective_section = this_key
+            sub(/\/[^\/]*$/, "", effective_section)
 
             # Perform any symbol table substitutions for this value, replacing variables
-            # with values.
-            if (index(value, "${")) {
-                for (entry in symbol_table) {
-                    if (entry != "") {
-                        # Process local variables first, so that they mask global (unsectioned)
-                        # variables.
-                        if (index(entry, section) == 1) {
-                            remainder = substr(entry, length(section) + 1)
-                            sub(/^\//, "", remainder)
-
-                            # Only consider symbols in this section and at this level. Any additional
-                            # slashes in the remainder indicate the entry belongs to a subsection.
-                            if (remainder != "" && index(remainder, "/") == 0) {
-                                gsub("\\$\\{" remainder "\\}", symbol_table[entry], value)
-                            }
-                        }
-
-                        # Take care of fully-qualified and global variables. A global variable
-                        # has no leading section name, while a fully-qualified variable gives
-                        # the path to the key in the form ${section/key}.
-                        gsub("\\$\\{" entry "\\}", symbol_table[entry], value)
-                    }
-                }
-
-                # If there are any leftover unmatched variables in the input, prune them.
-                gsub(/\$\{.*\}/, "", value)
+            # with values. This behavior can be disabled by turning off interpolation.
+            if (interpolation) {
+                value = resolve_symbols(value, effective_section)
             }
 
             # Strip any trailing whitespace off the final value
