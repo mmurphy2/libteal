@@ -27,7 +27,7 @@
 
 usage() {
     cat << EOF
-$0 [options] [-p key=value] [-o <directory>]
+$0 [options] [[ini_file] ...]
 
 Options:
     -h | --help
@@ -102,7 +102,11 @@ while [ $# -ne 0 ]; do
         ;;
         -p|--preload)
             if echo "$2" | grep -q "="; then
-                echo "TODO: reimplement preload"
+                if [ -z "${preload}" ]; then
+                    preload="$2"
+                else
+                    preload=$(printf "%s\n%s" "${preload}" "$2")
+                fi
                 shift 2
             else
                 echo "Preload: not a section/name=value pair: <$2>" >&2
@@ -133,6 +137,11 @@ fi
 echo "${output}"
 
 
+# Create the preload file
+preload_file=$(mktemp)
+echo "${preload}" > "${preload_file}"
+
+
 # Awk does the heavy lifting here
 awk \
     -v underscores=${underscores} \
@@ -140,8 +149,11 @@ awk \
     -f "${libteal_top}/path/cleanpath.awk" \
     -f "${whereami}/iniparse.awk" \
     -f "${whereami}/iniparse-output.awk" \
+    "${preload_file}" \
     "$@"
 #
 status=$?
+
+rm -f "${preload_file}"
 
 exit ${status}
