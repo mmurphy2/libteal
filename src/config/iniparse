@@ -2,6 +2,8 @@
 #
 # Configuration file handler that supports a dialect of INI format.
 #
+# Depends on: path/normpath.awk
+#
 # Copyright 2022 Coastal Carolina University
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -25,11 +27,9 @@
 
 usage() {
     cat << EOF
-$0 [options] [-c <file>] [-m var=key] [-p key=value] [-o <directory>]
+$0 [options] [-p key=value] [-o <directory>]
 
 Options:
-    -c <file> | --config <file>
-        Read from the specified <file> instead of standard input.
     -h | --help
         Show this help message and exit.
     -o <directory> | --output <directory>
@@ -67,7 +67,7 @@ file are written to the output directory as-is, while preloaded values for
 keys that are present in the INI file will be overridden by the values
 from the INI file.
 
-Finally, it is worth noting the advantages over using an INI configuration
+Finally, it is worth noting the advantages of using an INI configuration
 file as opposed to sourcing a configuration file made of shell code. First, a
 configuration expressed in shell code that is sourced by the main script
 becomes a potentially executable configuration, which does not enforce a
@@ -81,34 +81,17 @@ EOF
 }
 
 
-# concat_line <existing> <new_line>
-#
-# Concatenates <new_line> onto <existing> without producing extraneous empty lines in the
-# resulting data.
-concat_line() {
-    if [ -n "$1" ]; then
-        printf "%s\n%s" "$1" "$2"
-    else
-        echo "$2"
-    fi
-}
-
-
 self=$(readlink -e "$0")
 whereami=$(dirname "${self}")
+libteal_top=$(dirname "${whereami}")
 
 
 preload=
-config=
 output=
 underscores=1
 
 while [ $# -ne 0 ]; do
     case "$1" in
-        -c|--config)
-            config="$2"
-            shift 2
-        ;;
         -h|--help)
             usage
             exit 0
@@ -119,7 +102,7 @@ while [ $# -ne 0 ]; do
         ;;
         -p|--preload)
             if echo "$2" | grep -q "="; then
-                preload=$(concat_line "${preload}" "$2")
+                echo "TODO: reimplement preload"
                 shift 2
             else
                 echo "Preload: not a section/name=value pair: <$2>" >&2
@@ -131,21 +114,10 @@ while [ $# -ne 0 ]; do
             shift
         ;;
         *)
-            echo "Invalid option. Try -h or --help for help." >&2
-            exit 2
+            break
         ;;
     esac
 done
-
-
-# When no config file is specified, read from standard input
-if [ -z "${config}" ]; then
-    cfgdata=$(cat) || exit 1
-else
-    cfgdata=$(cat "${config}") || exit
-fi
-
-data=$(printf '%s\n%s\n%s\n%s\n' "${config}" "${preload}" "---" "${cfgdata}")
 
 
 # Resolve the output location
@@ -158,10 +130,18 @@ else
     output=$(mktemp -d)
 fi
 
+echo "${output}"
+
 
 # Awk does the heavy lifting here
-(cd "${output}" && echo "${data}" | awk -v underscores=${underscores} -f "${whereami}/iniparse.awk")
+awk \
+    -v underscores=${underscores} \
+    -v output_directory="${output}" \
+    -f "${libteal_top}/path/cleanpath.awk" \
+    -f "${whereami}/iniparse.awk" \
+    -f "${whereami}/iniparse-output.awk" \
+    "$@"
+#
 status=$?
 
-echo "${output}"
 exit ${status}

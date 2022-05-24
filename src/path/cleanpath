@@ -25,24 +25,29 @@
 
 usage() {
     cat << EOF
-$0 <-h|--help>
+$0 <-h | --help>
 $0 <path>
 cmd | $0
 
-Normalizes the path components, resolving . and .. to the extent possible
-within the available path space. Note that this command works only on virtual
-path data: no real file system paths are ever checked or used. Thus, this
-command is suitable for use with path components of URLs.
+Normalizes and cleans the path components, resolving . and .. to the extent
+possible within the available path space. Note that this command works only
+on virtual path data: no real file system paths are ever checked or used.
+Thus, this command is suitable for use with path components of URLs.
 
 Unlike realpath(1) or readlink(1), this command never makes any assumptions
-about what lies before the first path component, UNLESS the first path
-component is an absolute path. Therefore, first path components like .. can
-be safely used without introducing artifacts from the local file system.
+about what lies before the first path component. Therefore, first path
+components like .. can be safely used without introducing artifacts from the
+local file system.
 
-Note that the normalized path never ends in '/'. If a trailing slash is
-required, it must be added after normalization.
+During the normalization process, the path is also cleaned to make it
+relative to a hypothetical working directory. Any leading "/" from an
+absolute path is removed, as are any trailing slashes. Internal "." and ".."
+components are resolved to the extent possible in the given path space.
+Leading "." or ".." components are simply removed. The resulting path is thus
+designed so as not to be able to "escape" to a higher-level directory,
+making it suitable for use with configuration parsers.
 
-When normalizing a large number of paths, piping them into this command will
+When cleaning a large number of paths, piping them into this command will
 generally improve performance.
 EOF
 }
@@ -60,23 +65,13 @@ case "$1" in
 esac
 
 
-# We use awk for normalization and not realpath(1) (with -m) for three reasons:
-#
-# 1. realpath in BusyBox doesn't support -m, so it wouldn't be suitable inside the installation media, and
-# 2. Testing on a regular desktop system with realpath vs awk doesn't show enough of a time savings to
-#    warrant doing it differently here.
-# 3. In certain pathogenic cases, notably if the first component of the path to be joined is ..,
-#    realpath happily uses the current working directory as its starting point, even with the -m switch
-#    enabled. This is decidedly NOT what we want when working with URLs.
-#
-
 status=0
 
 if [ $# -eq 0 ]; then
-    cat | awk -F '/' -f "${whereami}/normpath.awk"
+    cat | awk -f "${whereami}/cleanpath.awk" -e '{print cleanpath($0)}'
     status=$?
 elif [ $# -eq 1 ]; then
-    echo "$1" | awk -F '/' -f "${whereami}/normpath.awk"
+    echo "$1" | awk -f "${whereami}/cleanpath.awk" -e '{print cleanpath($0)}'
     status=$?
 else
     echo "Usage: $0 <-h | --help>"
