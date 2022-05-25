@@ -30,12 +30,27 @@ usage() {
 $0 [options] [[ini_file] ...]
 
 Options:
+    -c <string> | --comments <string>
+        Use custom comment symbols. By default, INI files support the # and ;
+        characters to begin line comments. Custom single-character comment
+        symbols may be used by specifying this option. Note that only line
+        comments are supported, as inline comments in INI files quickly
+        become messy when parsing.
+    -d <string> | --delimiters <string>
+        Use custom delimiters between keys and values. By default, the
+        delimiter setting is "=:", which allows equals signs and colons to be
+        used. However, custom single-character delimiters can be used instead
+        by setting this option to a custom value.
     -h | --help
         Show this help message and exit.
     -i | --no-interpolation
         Disable variable interpolation.
     -m | --parameterized-sections
-        Enable section parameterization.
+        Enable section parameterization. Section parameterization facilitates
+        the use of sections of the form [base param], with a space or tab
+        character separating the base from the param. With parameterization
+        enabled, the resulting output directory will be a tree in the form
+        base/param, instead of the flat base_param.
     -o <directory> | --output <directory>
         Use <directory> for output instead of creating one with mktemp(1).
     -p section/key=value | --preload section/key=value
@@ -50,26 +65,44 @@ This program parses an INI file and produces a hierarchical output directory
 containing the information from the file. Each section in the INI file
 creates a directory in the output path, with the values from the INI file
 exported to plain text files named according to the keys in each section. By
-default, a new temporary directory is created, the path of which is output
-after processing is finished. However, an existing directory may be specified
-instead by using the -o option. Note that the directory specified with -o
-must already exist and will not be created.
+default, a new temporary directory is created, the path of which is printed
+to standard output. However, an existing directory may be specified instead
+by using the -o option. Note that the directory specified with -o must
+already exist and will not be created.
+
+One or more INI files may be specified on the command line. If multiple INI
+files are given, values with the same keys in the same sections of subsequent
+INI files override the corresponding values from prior INI files. In this
+way, a hierarchy of configurations is supported. If no INI files are given on
+the command line, then the INI configuration is read from standard input.
 
 The supported dialect of INI supports full-line comments but not inline ones.
-Line comments start with either # or ;. Values must NOT be quoted but may
-contain spaces. Multi-line values are supported if subsequent lines are
-indented at least to the level of the start of the value in the first line
-(or one position after the = if the first line is blank). Section names
-containing slashes will produce a hierarchy of subdirectories.
+Line comments start with either # or ; by default. The comment symbols may
+be adjusted with the -c option. Values must NOT be quoted but may contain
+spaces. Multi-line values are supported if subsequent lines are indented at
+least to the level of the start of the value in the first line (or one
+position after the = if the first line is blank). Section names containing
+slashes will produce a hierarchy of subdirectories. Keys containing slashes
+will create sections dynamically.
 
-Basic variable substitution within the configuration system is supported
-using the syntax \${key}, where key is another key in the configuration to
-be replaced by a value wherever \${key} is used in a value. Preloaded values
-for keys are supported by giving the -p option before each section/key=value
-mapping. Any preloaded values set for keys that do not appear in the INI
-file are written to the output directory as-is, while preloaded values for
-keys that are present in the INI file will be overridden by the values
-from the INI file.
+Variable interpolation within the configuration system is supported using the
+syntax \${key}, where key is another key in the configuration to be replaced
+by a value wherever \${key} is used in a value. Preloaded values for keys are
+supported by giving the -p option before each section/key=value mapping. Any
+preloaded values set for keys that do not appear in the INI file are written
+to the output directory as-is, while preloaded values for keys that are
+present in the INI file will be overridden by the values from the INI file.
+Although its practical utility is limited, indirect key lookups are also
+supported. Thus, if a configuration contains:
+
+[section]
+foo = bar
+baz = foo
+also_bar = \${\${baz}}
+
+then also_bar will contain the value "bar", which it reads from foo
+indirectly by way of baz. Note that all interpolation can be disabled by
+giving the -i option.
 
 Finally, it is worth noting the advantages of using an INI configuration
 file as opposed to sourcing a configuration file made of shell code. First, a
@@ -92,12 +125,22 @@ libteal_top=$(dirname "${whereami}")
 
 preload=
 output=
+comments="#;"
+delimiters="=:"
 interpolation=1
 parameterize=0
 underscores=1
 
 while [ $# -ne 0 ]; do
     case "$1" in
+        -c|--comments)
+            comments="$2"
+            shift 2
+        ;;
+        -d|--delimiters)
+            delimiters="$2"
+            shift 2
+        ;;
         -h|--help)
             usage
             exit 0
@@ -158,6 +201,8 @@ echo "${preload}" > "${preload_file}"
 
 # Awk does the heavy lifting here
 awk \
+    -v comments="${comments}" \
+    -v delimiters="${delimiters}" \
     -v interpolation=${interpolation} \
     -v parameterized_sections=${parameterize} \
     -v underscores=${underscores} \

@@ -116,6 +116,25 @@ BEGIN {
     indent = 0
     last_key = ""
 
+    # Permit custom comment symbols to be set. Only line comments are supported. For efficiency
+    # later, we need the comment symbols to be the keys of the comment_array. However, the split
+    # function will make them into the elements of the array instead. Thus, we split the comments
+    # string into an intermediate array, from which we can then build the comment_array.
+    if (comments == "") {
+        comments = "#;"
+    }
+    split(comments, comment_intermediate, "")
+    for (c in comment_intermediate) {
+        comment_array[comment_intermediate[c]] = 1
+    }
+
+    # Custom delimiters (apart from = and :) may also be set.
+    if (delimiters == "") {
+        delimiters = "=:"
+    }
+    split(delimiters, delim_array, "")
+
+    # Interpolation is on by default but can be disabled.
     if (interpolation == "") {
         interpolation = 1
     }
@@ -123,11 +142,6 @@ BEGIN {
 
 /^[ \t]*$/ {
     # Skip blank lines
-    next
-}
-
-/^[ \t]*[#;]/ {
-    # Skip line comments
     next
 }
 
@@ -149,91 +163,8 @@ BEGIN {
     next
 }
 
-/.*=.*/ {
-    # On every line that contains a name = value pair, start by splitting the line into an array.
-    # We need to know the number of splits, since a value could have an embedded = sign in it.
-    num_splits = split($0, pieces, "=")
 
-    if (num_splits >= 2) {
-        # Strip leading and trailing whitespace off the leftmost piece (the name). Also strip any
-        # leading whitespace off the second piece (the value), but leave any trailing whitespace for
-        # now, since a value might intentionally have trailing whitespace or an embedded = after
-        # trailing whitespace on the second piece.
-        sub(/^[ \t]*/, "", pieces[1])
-        sub(/[ \t]*$/, "", pieces[1])
-        sub(/^[ \t]*/, "", pieces[2])
-
-        # INI format is customarily case-insensitive, so store all keys in lowercase
-        pieces[1] = tolower(pieces[1])
-
-        # Clean up keys consisting only of "." or ".." (these cause issues later)
-        if (pieces[1] == ".") {
-            pieces[1] = "_"
-        }
-        else if (pieces[1] == ".." ) {
-            pieces[1] = "__"
-        }
-
-        if (pieces[1] != "") {
-            # There might be embedded = signs, resulting in more than two pieces. Reassemble the right hand
-            # side of the variable assignment.
-            value = pieces[2]
-            if (num_splits > 2) {
-                for (i=3; i<=num_splits; i++) {
-                    value = value "=" pieces[i]
-                }
-            }
-
-            # Compute the symbol table key
-            this_key = pieces[1]
-            if (section != "" && index(this_key, "/") != 1) {
-                this_key = section "/" pieces[1]
-            }
-            sub(/^\/+/, "", this_key)
-
-            # It is possible for a key to contain slashes (and therefore define sections). For variable
-            # substitution purposes, we need to get the effective section from the key itself.
-            effective_section = this_key
-            sub(/\/[^\/]*$/, "", effective_section)
-
-            # Perform any symbol table substitutions for this value, replacing variables
-            # with values. This behavior can be disabled by turning off interpolation.
-            if (interpolation) {
-                value = resolve_symbols(value, effective_section)
-            }
-
-            # Strip any trailing whitespace off the final value
-            sub(/[ \t]*$/, "", value)
-
-            # Add this value to the symbol table for later substitutions
-            symbol_table[this_key] = value
-
-            # Save the indent amount and current key (as last_key), in case we have a multiline value.
-            # With such values, we want the indentation to line up with the first nonblank character
-            # to the right of the "=" sign, or to the right of the = sign if blank
-            indent = index($0, "=") + 1
-            extra = match(substr($0, indent), /[^ \t]/)
-            if (extra > 1) {
-                indent += extra - 1
-            }
-            last_key = this_key
-        }
-        else {
-            print FILENAME ": Syntax error at line " NR > "/dev/stderr"
-            print "    > " $0 > "/dev/stderr"
-            have_error = 1
-        }
-    }
-    else {
-        print FILENAME ": Syntax error at line " NR > "/dev/stderr"
-        print "    > " $0 > "/dev/stderr"
-        have_error = 1
-    }
-
-    next
-}
-
-
+# Everything else has enough edge cases to require manual handling
 {
     first_char = match($0, /[^ \t]/)
     if (indent > 0 && first_char >= indent && last_key != "") {
@@ -242,12 +173,84 @@ BEGIN {
         sub(/[ \t]*$/, value)
         symbol_table[last_key] = value
     }
-    else {
-        # Catch all: if none of the patterns match, we have a syntax error in the configuration
-        # file. Note the location of the error. NB: /dev/stderr is defined for both gawk and
-        # BusyBox awk.
-        print FILENAME ": Syntax error at line " NR > "/dev/stderr"
-        print "    > " $0 > "/dev/stderr"
-        have_error = 1
+    else if (substr($0, first_char, 1) in comment_array) {
+        next
     }
+    else {
+        # The key and value may be separated by any delimiter.
+        for (d in delim_array) {
+            division = index($0, delim_array[d])
+            if (division > 0) {
+                break
+            }
+        }
+
+        if (division > 0) {
+            # Split the key and value
+            key = substr($0, 1, division - 1)
+            value = substr($0, division + 1)
+
+            # Strip leading and trailing whitespace off the key and value
+            sub(/^[ \t]*/, "", key)
+            sub(/[ \t]*$/, "", key)
+            sub(/^[ \t]*/, "", value)
+            sub(/[ \t\r\n]*$/, "", value)
+
+            # INI format is customarily case-insensitive, so store all keys in lowercase
+            key = tolower(key)
+
+            # Clean up keys consisting only of "." or ".." (these cause issues later)
+            if (key == ".") {
+                key = "_"
+            }
+            else if (key == ".." ) {
+                key = "__"
+            }
+
+            if (key != "") {
+                # Prepend the section name, if it is set AND the key doesn't contain a slash. Strip any
+                # leading slashes to make lookups consistent later.
+                if (section != "" && index(key, "/") == 0) {
+                    key = section "/" key
+                }
+                sub(/^\/+/, "", key)
+
+                # It is possible for a key to contain slashes (and therefore define sections). For variable
+                # substitution purposes, we need to get the effective section from the key itself.
+                effective_section = key
+                sub(/\/[^\/]*$/, "", effective_section)
+
+                # Perform any symbol table substitutions for the value, replacing variables with the contents
+                # of corresponding keys. This behavior can be disabled by setting interpolation to zero.
+                if (interpolation) {
+                    value = resolve_symbols(value, effective_section)
+                }
+
+                # Add this value to the symbol table for later substitutions
+                symbol_table[key] = value
+
+                # Save the indent amount and current key (as last_key), in case we have a multiline value.
+                # With such values, we want the indentation to line up with the first nonblank character
+                # to the right of the "=" sign, or to the right of the = sign if blank
+                indent = division + 1
+                extra = match(substr($0, indent), /[^ \t]/)
+                if (extra > 1) {
+                    indent += extra - 1
+                }
+                last_key = key
+            }
+            else {
+                print FILENAME ": Syntax error: missing key at line " NR > "/dev/stderr"
+                print "    > " $0 > "/dev/stderr"
+                have_error = 1
+            }
+        }
+        else {
+            print FILENAME ": Syntax error at line " NR > "/dev/stderr"
+            print "    > " $0 > "/dev/stderr"
+            have_error = 1
+        }
+    }
+
+    next
 }
