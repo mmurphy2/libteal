@@ -25,17 +25,17 @@
 
 
 # Recursive resolver for variable interpolation. Supports both direct and indirect variable
-# lookups (${foo} and ${${foo}}).
+# lookups (${foo} and ${${foo}}). Environment variables may be referenced using ${[VAR]}.
 #
 # Called using: resolve_symbols(value, this_section)
 #
 # where value is the right hand side of an assignment, while this_section is the name of
 # the section in which the key=value assignment occurs. When resolving variables, unqualified
-# variable names (those that do not contain a /) are first resolved using other keys from the
+# variable names (those that do not contain a :) are first resolved using other keys from the
 # same section. Global (unsectioned) keys are checked if no matching key exists in this section.
 # An unresolved variable is replaced by an empty string.
 #
-function resolve_symbols(value, this_section,  _check, _endex, _index, _infix, _prefix, _result, _suffix) {
+function resolve_symbols(value, this_section,  _check, _endex, _index, _infix, _keypart, _prefix, _secpart, _result, _suffix) {
     _index = index(value, "${")
 
     if (_index) {
@@ -61,28 +61,48 @@ function resolve_symbols(value, this_section,  _check, _endex, _index, _infix, _
             _suffix = substr(_infix, _endex + 1)
             _infix = substr(_infix, 1, _endex - 1)
 
-            # If the infix, which is now the variable name, contains a slash, we assume that it is
-            # a fully-qualified reference to a key in a section. Look up and substitute directly. If
-            # there is no match, replace the variable with an empty string.
-            if (index(_infix, "/")) {
-                if (_infix in symbol_table) {
-                    _infix = symbol_table[_infix]
+            if (index(_infix, "[") == 1) {
+                # Environment variables can be referenced by enclosing the name in square brackets.
+                _infix = substr(_infix, 2, length(_infix) - 2)
+
+                if (verbose) {
+                    print "Environment variable lookup: " _infix > "/dev/stderr"
+                }
+
+                if (_infix in ENVIRON) {
+                    _infix = ENVIRON[_infix]
+                }
+                else {
+                    _infix = ""
+                }
+            }
+            else if (index(_infix, ":")) {
+                # If the infix, which is now the variable name, contains a colon, we assume that it is
+                # a fully-qualified reference to a key in a section. Look up and substitute directly. If
+                # there is no match, replace the variable with an empty string.
+                _secpart = _infix
+                _keypart = _infix
+                sub(/:[^:]*$/, "", _secpart)
+                sub(/^.*:/, "", _keypart)
+
+                if ((_secpart,_keypart) in symbol_table) {
+                    _infix = symbol_table[_secpart, _keypart]
                 }
                 else {
                     _infix = ""
                 }
             }
             else {
-                # For a variable name that does not contain a slash, first look in the current
+                # For a variable name that does not contain a colon, first look in the current
                 # section to see if we have a key with the same name. If so, use that key. Otherwise,
                 # see if a matching key exists at the global (unsectioned) level. Failing both lookups,
                 # replace the variable with an empty string.
-                if (this_section "/" _infix in symbol_table) {
-                    _infix = symbol_table[this_section "/" _infix]
+                if ((this_section, _infix) in symbol_table) {
+                    _infix = symbol_table[this_section, _infix]
                 }
                 else {
-                    if (_infix in symbol_table) {
-                        _infix = symbol_table[_infix]
+                    if (("", _infix) in symbol_table) {
+                        _infix = symbol_table["", _infix]
                     }
                     else {
                         _infix = ""
@@ -145,7 +165,7 @@ BEGIN {
     next
 }
 
-/[ \t]*\[.*\]/ {
+/^[ \t]*\[.*\]/ {
     # Handle section markers, with whitespace stripped at both ends. INI file sections and keys
     # are typically case-insensitive, so we use lowercase here.
     sub(/^[ \t]*/, "", $0)
@@ -153,12 +173,13 @@ BEGIN {
     sub(/^[ \t]*/, "", section)
     sub(/[ \t]*$/, "", section)
 
-    # If section parameterization is enabled, replace the first space or tab in the section name
-    # (if any) with a slash. This feature enables different sections to be grouped under a single
-    # hierarchy in the output.
-    if (parameterized_sections) {
-        sub(/[ \t]/, "/", section)
+    if (verbose) {
+        print "In section [" section "]" > "/dev/stderr"
     }
+
+    # Reset indent and last_key, since an indented continuation of a previous key cannot span sections
+    indent = 0
+    last_key = ""
 
     next
 }
@@ -169,9 +190,9 @@ BEGIN {
     first_char = match($0, /[^ \t]/)
     if (indent > 0 && first_char >= indent && last_key != "") {
         # Multiline value: append it to the last saved result, but preserve internal indentation
-        value = symbol_table[last_key] "\n" substr($0, indent)
+        value = symbol_table[section, last_key] "\n" substr($0, indent)
         sub(/[ \t]*$/, value)
-        symbol_table[last_key] = value
+        symbol_table[section, last_key] = value
     }
     else if (substr($0, first_char, 1) in comment_array) {
         next
@@ -199,35 +220,18 @@ BEGIN {
             # INI format is customarily case-insensitive, so store all keys in lowercase
             key = tolower(key)
 
-            # Clean up keys consisting only of "." or ".." (these cause issues later)
-            if (key == ".") {
-                key = "_"
-            }
-            else if (key == ".." ) {
-                key = "__"
-            }
-
             if (key != "") {
-                # Prepend the section name, if it is set AND the key doesn't contain a slash. Strip any
-                # leading slashes to make lookups consistent later.
-                if (section != "" && index(key, "/") == 0) {
-                    key = section "/" key
-                }
-                sub(/^\/+/, "", key)
-
-                # It is possible for a key to contain slashes (and therefore define sections). For variable
-                # substitution purposes, we need to get the effective section from the key itself.
-                effective_section = key
-                sub(/\/[^\/]*$/, "", effective_section)
-
                 # Perform any symbol table substitutions for the value, replacing variables with the contents
                 # of corresponding keys. This behavior can be disabled by setting interpolation to zero.
                 if (interpolation) {
-                    value = resolve_symbols(value, effective_section)
+                    value = resolve_symbols(value, section)
                 }
 
                 # Add this value to the symbol table for later substitutions
-                symbol_table[key] = value
+                if (verbose) {
+                    print "Adding " section ":" key "=" value > "/dev/stderr"
+                }
+                symbol_table[section, key] = value
 
                 # Save the indent amount and current key (as last_key), in case we have a multiline value.
                 # With such values, we want the indentation to line up with the first nonblank character

@@ -1,8 +1,6 @@
 #!/usr/bin/awk
 #
-# Produces an output directory hierarchy from a parsed INI configuration file.
-#
-# Depends on: path/cleanpath.awk
+# Produces output directory from a parsed INI configuration file.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -25,51 +23,84 @@
 # IN THE SOFTWARE.
 #
 
+
+BEGIN {
+    # The default character for replacing "/" is "-"
+    if (slash_replace == "") {
+        slash_replace = "-"
+    }
+}
+
+
 END {
-    # Now we need to dump the symbol table out to a directory hierarchy in the current working
-    # directory. This requires splitting the directory and file names from the qualified key names.
-    # It also means sanitizing the output section and key names properly, so that we do not
-    # produce any output outside the specified output_directory. Begin by producing a sanitized
-    # symbol table and a list of directories that need to be created.
+    # Each entry in the symbol table needs to be written into the output_directory.
     for (entry in symbol_table) {
-        clean_entry = cleanpath(entry)
+        # awk doesn't have real multidimensional arrays, so we have to separate the section and key
+        # from the symbol table entry string.
+        split(entry, st_parts, SUBSEP)
+        raw_section = st_parts[1]
+        raw_key = st_parts[2]
+
+        # Make copies of the raw section and key, so that we can produce the index file later
+        out_section = raw_section
+        out_key = raw_key
+
+        # If section parameterization is enabled, replace the first space or tab in the section name
+        # (if any) with a custom string to make output parsing potentially easier.
+        if (parameterized_sections) {
+            sub(/[ \t]/, parameterized_sections, out_section)
+        }
+
+        # Replace spaces and tabs with underscores, if enabled
         if (underscores) {
-            gsub(/[ \t]/, "_", clean_entry)
+            gsub(/[ \t]/, "_", out_section)
+            gsub(/[ \t]/, "_", out_key)
         }
 
-        num_cpts = split(clean_entry, cpts, "/")
-        dirname = cpts[1]
-        for (i=2; i<num_cpts; i++) {
-            dirname = dirname "/" cpts[i]
+        # We must replace slashes to avoid a potential security risk resulting from path elements
+        # in the section and key names.
+        gsub("/", slash_replace, out_section)
+        gsub("/", slash_replace, out_key)
+
+        # To avoid a conflict between a key and a section that have the same name, prefix keys with k_
+        # and sections with s_. Index files are prefixed with i_.
+        dest = output_directory "/k_" out_key
+        dest_index = output_directory "/i_" out_key
+        if (out_section) {
+            if (dotted_output) {
+                dest = output_directory "/s_" out_section ".k_" out_key
+                dest_index = output_directory "/s_" out_section ".i_" out_key
+            }
+            else {
+                # When dotted output isn't used, we need to create the section directories inside
+                # the output directory.
+                system("mkdir -p '" output_directory "/s_" out_section "'")
+                dest = output_directory "/s_" out_section "/k_" out_key
+                dest_index = output_directory "/s_" out_section "/i_" out_key
+            }
         }
 
-        if (num_cpts > 1) {
-            create_directories[dirname] = 1
+        if (verbose) {
+            print "Writing " raw_section ":" raw_key " to " dest > "/dev/stderr"
         }
 
-        clean_table[clean_entry] = symbol_table[entry]
-    }
-
-    # Create the directory hierarchy first
-    for (directory in create_directories) {
-        system("mkdir -p '" output_directory "/" directory "'")
-    }
-
-    # Now write the values. Note that it is possible to have a conflict between a key name and a
-    # section name inside the INI file. To work around this occurrence, we move the conflicting
-    # key into the resulting section with the special name __value__.
-    for (clean_entry in clean_table) {
-        if (clean_entry in create_directories) {
-            dest = output_directory "/" clean_entry "/__value__"
+        # Be sure that an empty value results in an empty file
+        if (symbol_table[entry]) {
+            print symbol_table[entry] > dest
         }
         else {
-            dest = output_directory "/" clean_entry
+            printf "%s", "" > dest
         }
-        print clean_table[clean_entry] > dest
+
+        # If requested, the index file contains the raw section and key names on separate lines; these
+        # may be used by other code to recreate the original INI file.
+        if (write_index) {
+            printf "%s\n%s\n", raw_section, raw_key > dest_index
+        }
     }
 
     # Set failure exit code whenever an error is detected in the configuration file
-    if (have_error == "yes") {
+    if (have_error) {
         exit 1
     }
 }
