@@ -37,11 +37,20 @@ $0 [options] [-- curl_options --] <proto://host> <output_base> \\
              [[<remote_path> <local_filename>] ...]
 
 Options:
+    -e | --enable-config
+        Enable reading the default curl configuration file(s). These are
+        normally disabled, since the default configuration file locations
+        are per-user instead of systemwide (see the man page for curl(1)).
+        Providing this option suppresses the -q or --disable option, but
+        later specifying -q or --disable in the curl_options will still
+        prevent default configuration files from being loaded.
     -h | --help
         Show this help message and exit.
     -s <dir> | --status <dir>
         Use the specified directory for status files. Otherwise, a temporary
         directory is created with mktemp(1).
+    -v | --verbose
+        Display additional debugging output on standard error.
 
 Any option supported by curl(1) may be passed by surrounding the curl
 options with two dashes (--) separated by spaces.
@@ -82,6 +91,13 @@ EOF
 }
 
 
+printv() {
+    if [ -n "${verbose}" ]; then
+        printf "$@" >&2
+    fi
+}
+
+
 update_progress() {
     cat "${status_output}/progress.log" | tr '\r' '\n' | tail -n 1 | \
         awk -f "${whereami}/download_file.awk" \
@@ -95,8 +111,14 @@ update_progress() {
 
 status_output=
 proxy=
+enable_config="-q"
+verbose=
 while [ $# -gt 0 ]; do
     case "$1" in
+        -e|--enable-config)
+            enable_config=
+            shift
+        ;;
         -h|--help)
             usage
             exit 0
@@ -105,6 +127,10 @@ while [ $# -gt 0 ]; do
             status_output="$2"
             shift 2
         ;;
+        -v|--verbose)
+            verbose="y"
+            shift
+        ;;
         *)
             break
         ;;
@@ -112,19 +138,52 @@ while [ $# -gt 0 ]; do
 done
 
 
+curl_conf="# generated curl configuration"
 if [ "$1" == "--" ]; then
-    # TODO
+    shift
+    while [ $# -gt 0 -a "x$1" != "--" ]; do
+        if echo "$1" | grep -q '^-'; then
+            # We have an option: start a new line and append the option
+            curl_conf=$(printf "%s\n%s" "${curl_conf}" "$1")
+            shift
+        else
+            # We have an argument to an option: append a quoted version after whitespace
+            curl_conf=$(printf "%s \"%s\"" "${curl_conf}" "$1")
+            shift
+        fi
+    done
+    shift  # Remove the final --
 fi
 
 
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 [options] <URL> <output_path>" >&2
+if [ $# -lt 4 ]; then
+    echo "Usage: $0 [opts] [-- curlopts --] <host> <outpath> <remote> <local> [...]" >&2
+    echo "   Use --help for details" >&2
     exit 2
 fi
 
 
-url="$1"
+baseurl="$1"
 out_path="$2"
+shift 2
+
+this_url=
+while [ $# -gt 0 ]; do
+    if [ -z "${this_url}" ]; then
+        this_url="${base_url}/$1"
+    else
+        this_file="${out_path}/$1"
+        curl_conf=$(printf "%s\n--url \"%s\"\n--output \"%s\"" "${curl_conf}" "${this_url}" "${this_file}")
+        this_url=
+    fi
+    shift
+done
+
+
+if [ -n "${this_url}" ]; then
+    echo "Incorrect number of arguments: each remote needs local path" >&2
+    exit 2
+fi
 
 if [ -d "${out_path}" ]; then
     out_path=$(echo "${out_path}" | sed 's|/*$||')
@@ -154,18 +213,12 @@ echo "${status_output}"
 # Test write permissions by writing the PID of this script to the output directory
 echo $$ > "${status_output}/wrapper_pid" || exit 1
 
+printv "---\nCurl Config:\n%s\n---\n" "${curl_conf}"
 
 # Start curl in the background
-curlpid=
-if [ -z "${proxy}" ]; then
-    curl -w '%{http_code}\n' -f -o "${out_path}" "${url}" 2>"${status_output}/progress.log" \
-        > "${status_output}/http_code" &
-    curlpid=$!
-else
-    curl -w '%{http_code}\n' -x "${proxy}" -f -o "${out_path}" "${url}" \
-        2>"${status_output}/progress.log" > "${status_output}/http_code" &
-    curlpid=$!
-fi
+echo "${curl_conf}" | curl ${enable_config} -w '%{http_code}\n' -f -K - \
+    2>"${status_output}/progress.log" >"${status_output}/http_codes" &
+curlpid=$!
 
 
 # While curl runs, update the progress information every second, yielding between updates
