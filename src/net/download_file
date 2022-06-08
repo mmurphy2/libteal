@@ -1,7 +1,8 @@
 #!/bin/dash
 #
-# Downloads a single file using curl(1). Download progress information is
-# written to a temporary directory as the operation proceeds.
+# Downloads one or more files from a single server using curl(1). Download
+# progress information is written to a temporary directory as the operation
+# proceeds.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -23,6 +24,7 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
+# TODO refactoring in progress: not currently working
 
 whatami=$(readlink -e "$0")
 whereami=$(dirname "${whatami}")
@@ -30,26 +32,43 @@ whereami=$(dirname "${whatami}")
 
 usage() {
     cat << EOF
-$0 [options] <URL> <output_path>
+$0 [options] [-- curl_options --] <proto://host> <output_base> \\
+             <remote_path> <local_filename> \\
+             [[<remote_path> <local_filename>] ...]
 
 Options:
     -h | --help
         Show this help message and exit.
-    -p <server> | --proxy <server>
-        Use the specified proxy server to complete the download.
     -s <dir> | --status <dir>
         Use the specified directory for status files. Otherwise, a temporary
         directory is created with mktemp(1).
 
-Downloads the requested file from <URL>, saving it to <output_path>. if the
-<output_path> is a directory, then the filename from the <URL> is used as
-the destination file within the directory. Upon starting the download, the
-status directory path is printed on standard output.
+Any option supported by curl(1) may be passed by surrounding the curl
+options with two dashes (--) separated by spaces.
 
-The status directory contains information about the ongoing download:
+This program downloads one or more files from a single server, saving them
+according to the specified <local_filename> in the <output_base> directory.
+The base URL of the server is specified using <proto://host>. Each
+<remote_path> is appended to the base directory to obtain the remote URL.
+Upon starting the operation, the status directory path is printed on
+standard output.
 
- percent              Integer percentage of the download completed
+The status directory is organized in a hierarchy with individual download
+data directories numbered starting from 0. At the top level, status
+information consists of:
+
+ base_url             The base URL from which files are downloaded
+ current_transfer     The number of the current transfer
+ http_codes           Response codes for all HTTP transfers
  progress.log         Raw progress output from curl
+ result               Overall exit status, available when finished
+ total_transfers      The total number of files to be transferred
+
+Each individual file transfer has its own status directory containing
+information about the ongoing download:
+
+ http_code            Response code for HTTP transfers
+ percent              Integer percentage of the download completed
  remain               Time remaining in seconds
  result               Exit status of curl, after download finishes
  speed                Current transfer speed in bytes per second
@@ -82,10 +101,6 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
         ;;
-        -p|--proxy)
-            proxy="$2"
-            shift 2
-        ;;
         -s|--status)
             status_output="$2"
             shift 2
@@ -95,6 +110,11 @@ while [ $# -gt 0 ]; do
         ;;
     esac
 done
+
+
+if [ "$1" == "--" ]; then
+    # TODO
+fi
 
 
 if [ $# -ne 2 ]; then
