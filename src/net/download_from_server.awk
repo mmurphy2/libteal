@@ -23,47 +23,57 @@
 # IN THE SOFTWARE.
 
 
-function to_bytes(size) {
+# TODO continue refactoring: not currently working
+
+
+function to_bytes(size,  _result, _suffix) {
+    _result = ""
+
+    # A bare number without a suffix is just a number of bytes
+    if (size ~ /^[0-9\.]+$/) {
+        _result = size
+    }
+    else {
+        # Separate the numeric portion from the suffix
+        _suffix = size
+        gsub(/[^0-9\.]/, "", size)
+        sub(size, "", _suffix)
+
+        if (_suffix in table) {
+            _result = size * 2^table[suffix]
+        }
+    }
+
+    return _result
+}
+
+
+function to_seconds(time,  _count, _parts, _result) {
+    _result = 0
+
+    # curl provides its time output in H:MM:SS format, but we store the result in raw seconds,
+    # since it is easier to do computations on seconds (and simple to convert back later if needed)
+    _count = split(time, _parts, ":")
+    if (_count == 3) {
+        if (_parts[1] != "--") {
+            _result = 3600*_parts[1] + 60*_parts[2] + _parts[3]
+        }
+    }
+
+    return _result
+}
+
+
+BEGIN {
     # Mapping of prefixes to corresponding powers of two
     table["K"] = 10
     table["M"] = 20
     table["G"] = 30
     table["T"] = 40
     table["P"] = 50
-    result = ""
 
-    # A bare number without a suffix is just a number of bytes
-    if (size ~ /^[0-9\.]+$/) {
-        result = size
-    }
-    else {
-        # Separate the numeric portion from the suffix
-        suffix = size
-        gsub(/[^0-9\.]/, "", size)
-        sub(size, "", suffix)
-
-        if (suffix in table) {
-            result = size * 2^table[suffix]
-        }
-    }
-
-    return result
-}
-
-
-function to_seconds(time) {
-    result = 0
-
-    # curl provides its time output in H:MM:SS format, but we store the result in raw seconds,
-    # since it is easier to do computations on seconds (and simple to convert back later if needed)
-    count = split(time, parts, ":")
-    if (count == 3) {
-        if (parts[1] != "--") {
-            result = 3600*parts[1] + 60*parts[2] + parts[3]
-        }
-    }
-
-    return result
+    # We will start the transfer counter at -1 and let it get incremented to zero with the first header
+    xfer_number = -1
 }
 
 
@@ -73,13 +83,22 @@ function to_seconds(time) {
 #                                  Dload  Upload   Total   Spent    Left  Speed
 # 100   672  100   672    0     0   6549      0 --:--:-- --:--:-- --:--:--  6588
 #
-# Only the data line should be sent as input here (e.g. run through tail -n 1 first).
+# The header is distinguished from the data line by checking to see if the first field is a '%' sign.
+#
 (NF == 12) {
-    total = to_bytes($2)
-    percent = $3
-    transferred = to_bytes($4)
-    remain = to_seconds($11)
-    speed = to_bytes($12)
+    if ($1 == "%") {
+        # This is a header line: increment the transfer number
+        xfer_number++
+    }
+    else {
+        # We have a data line: write the required information to the status output
+        # TODO: shortcut - don't write the 100% transfer data for completed transfers more than once
+        total = to_bytes($2)
+        percent = $3
+        transferred = to_bytes($4)
+        remain = to_seconds($11)
+        speed = to_bytes($12)
+    }
 }
 
 

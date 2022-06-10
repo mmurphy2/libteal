@@ -50,7 +50,7 @@ Options:
         Use the specified directory for status files. Otherwise, a temporary
         directory is created with mktemp(1).
     -v | --verbose
-        Display additional debugging output on standard error.
+        Display generated curl configuration on standard error.
 
 Any option supported by curl(1) may be passed by surrounding the curl
 options with two dashes (--) separated by spaces.
@@ -59,12 +59,13 @@ This program downloads one or more files from a single server, saving them
 according to the specified <local_filename> in the <output_base> directory.
 The base URL of the server is specified using <proto://host>. Each
 <remote_path> is appended to the base directory to obtain the remote URL.
-Upon starting the operation, the status directory path is printed on
-standard output.
+At the time of program invocation, <output_base> must already exist and be
+writable by the program user.
 
-The status directory is organized in a hierarchy with individual download
-data directories numbered starting from 0. At the top level, status
-information consists of:
+Upon starting the operation, the status directory path is printed on
+standard output. The status directory is organized in a hierarchy with
+individual download data directories numbered starting from 0. At the top
+level, status information consists of:
 
  base_url             The base URL from which files are downloaded
  current_transfer     The number of the current transfer
@@ -91,21 +92,9 @@ EOF
 }
 
 
-printv() {
-    if [ -n "${verbose}" ]; then
-        printf "$@" >&2
-    fi
-}
-
-
 update_progress() {
-    cat "${status_output}/progress.log" | tr '\r' '\n' | tail -n 1 | \
-        awk -f "${whereami}/download_file.awk" \
-            -v percent_file="${status_output}/percent" \
-            -v remain_file="${status_output}/remain" \
-            -v speed_file="${status_output}/speed" \
-            -v total_file="${status_output}/total" \
-            -v transferred_file="${status_output}/transferred"
+    cat "${status_output}/progress.log" | tr '\r' '\n' | \
+        awk -f "${whereami}/download_from_server.awk" -v status_root="${status_output}"
 }
 
 
@@ -138,6 +127,7 @@ while [ $# -gt 0 ]; do
 done
 
 
+# Generate the curl configuration by appending any curl options
 curl_conf="# generated curl configuration"
 if [ "$1" == "--" ]; then
     shift
@@ -156,6 +146,8 @@ if [ "$1" == "--" ]; then
 fi
 
 
+# If the user forgot the -- after the curl options, checking the usage here will catch it. Also, we
+# haven't yet created any files or directories, so this is a clean place to do the check.
 if [ $# -lt 4 ]; then
     echo "Usage: $0 [opts] [-- curlopts --] <host> <outpath> <remote> <local> [...]" >&2
     echo "   Use --help for details" >&2
@@ -163,40 +155,57 @@ if [ $# -lt 4 ]; then
 fi
 
 
-baseurl="$1"
-out_path="$2"
+# Obtain the base URL and output path from the first two arguments. Clean up to remove any trailing slashes.
+baseurl=$(echo "$1" | sed 's/\/*$//')
+out_path=$(echo "$2" | sed 's/\/*$//')
+[ -z "${out_path}" ] && out_path="/"
+
+
+# Quick sanity check: be sure the baseurl actually looks like a URL
+if ! echo "${baseurl}" | grep -q '^[A-Za-z0-9][A-Za-z0-9]*://'; then
+    echo "Invalid URL format: $1" >&2
+    exit 2
+fi
+
+
+# Check that the output directory exists and is writable
+if [ -d "${out_path}" ]; then
+    if [ ! -w "${out_path}" ]; then
+        echo "Not writable: ${out_path}" >&2
+        exit 1
+    fi
+else
+    echo "Directory not found: ${out_path}" >&2
+    exit 1
+fi
+
+
+# Done checking URL and output path
 shift 2
 
+
+# Now we need to create the rest of the curl configuration file, which will consist of pairs of --url
+# and --output entries. Also figure out how many files we will transfer.
+xfer_count=0
 this_url=
 while [ $# -gt 0 ]; do
     if [ -z "${this_url}" ]; then
+        # We will write both the URL and output entry together in the configuration file, so save the url for now
         this_url="${base_url}/$1"
     else
         this_file="${out_path}/$1"
         curl_conf=$(printf "%s\n--url \"%s\"\n--output \"%s\"" "${curl_conf}" "${this_url}" "${this_file}")
         this_url=
+        xfer_count=$(( xfer_count + 1 ))
     fi
     shift
 done
 
 
+# If correct arguments have been given, this_url should be empty after generating the final configuration pair
 if [ -n "${this_url}" ]; then
     echo "Incorrect number of arguments: each remote needs local path" >&2
     exit 2
-fi
-
-if [ -d "${out_path}" ]; then
-    out_path=$(echo "${out_path}" | sed 's|/*$||')
-    base_name=$(basename "${url}")
-    out_path="${out_path}/${base_name}"
-fi
-
-
-# Quick sanity check for the output path:
-parent=$(dirname "${out_path}")
-if [ ! -d "${parent}" ]; then
-    echo "Directory not found: ${parent}" >&2
-    exit 1
 fi
 
 
@@ -213,7 +222,23 @@ echo "${status_output}"
 # Test write permissions by writing the PID of this script to the output directory
 echo $$ > "${status_output}/wrapper_pid" || exit 1
 
-printv "---\nCurl Config:\n%s\n---\n" "${curl_conf}"
+
+# Write the base URL and total transfer count files, then create the progress directories
+echo "${base_url}" > "${status_output}/base_url"
+echo "${xfer_count}" > "${status_output}/total_transfers"
+x=0
+while [ x -lt ${xfer_count} ]; do
+    mkdir -p "${status_output}/${x}"
+done
+
+
+# If verbose mode is enabled, display the curl config on stderr
+if [ -n "${verbose}" ]; then
+    echo "---" >&2
+    echo "${curl_conf}" >&2
+    echo "---" >&2
+fi
+
 
 # Start curl in the background
 echo "${curl_conf}" | curl ${enable_config} -w '%{http_code}\n' -f -K - \
