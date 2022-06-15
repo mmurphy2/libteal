@@ -23,9 +23,6 @@
 # IN THE SOFTWARE.
 
 
-# TODO continue refactoring: not currently working
-
-
 function to_bytes(size,  _result, _suffix) {
     _result = ""
 
@@ -40,7 +37,7 @@ function to_bytes(size,  _result, _suffix) {
         sub(size, "", _suffix)
 
         if (_suffix in table) {
-            _result = size * 2^table[suffix]
+            _result = size * 2^table[_suffix]
         }
     }
 
@@ -64,6 +61,31 @@ function to_seconds(time,  _count, _parts, _result) {
 }
 
 
+function write_stats() {
+    percent_file = status_root "/" saved_xfer_number "/percent"
+    remain_file = status_root "/" saved_xfer_number "/remain"
+    speed_file = status_root "/" saved_xfer_number "/speed"
+    total_file = status_root "/" saved_xfer_number "/total"
+    transferred_file = status_root "/" saved_xfer_number "/transferred"
+
+    if (percent != "") {
+        printf("%d\n", percent) > percent_file
+    }
+    if (remain != "") {
+        printf("%d\n", remain) > remain_file
+    }
+    if (speed != "") {
+        printf("%d\n", speed) > speed_file
+    }
+    if (total != "") {
+        printf("%d\n", total) > total_file
+    }
+    if (transferred != "") {
+        printf("%d\n", transferred) > transferred_file
+    }
+}
+
+
 BEGIN {
     # Mapping of prefixes to corresponding powers of two
     table["K"] = 10
@@ -72,8 +94,12 @@ BEGIN {
     table["T"] = 40
     table["P"] = 50
 
-    # We will start the transfer counter at -1 and let it get incremented to zero with the first header
+    # We will start the transfer counters at -1 and let them get incremented to zero with the first header.
     xfer_number = -1
+    saved_xfer_number = -1
+
+    # Saved transfer number location
+    xfer_number_file = status_root "/current_transfer"
 }
 
 
@@ -87,38 +113,54 @@ BEGIN {
 #
 (NF == 12) {
     if ($1 == "%") {
-        # This is a header line: increment the transfer number
+        # This is a header line: increment the transfer number.
         xfer_number++
+
+        # Now get the saved transfer number from the current_transfer file. Close the file after
+        # reading, so that we can update it with immediate effect if necessary.
+        result = getline saved_xfer_number < xfer_number_file
+        close(xfer_number_file)
+
+        if (result <= 0) {
+            # Treat a failure to open the file as evidence of no prior saved transfer number
+            printf("%d\n", xfer_number) > xfer_number_file
+            close(xfer_number_file)
+            saved_xfer_number = xfer_number
+        }
+        else if (xfer_number > saved_xfer_number) {
+            # If the current transfer number is greater than the previous one, first write any statistics
+            # data from the previous transfer to the respective files. Then, increment the saved transfer
+            # number.
+            write_stats()
+            printf("%d\n", xfer_number) > xfer_number_file
+            close(xfer_number_file)
+            saved_xfer_number = xfer_number
+        }
+
+        # Reset the data variables, since the header line indicates the end of the previous transfer data
+        percent = ""
+        remain = ""
+        speed = ""
+        total = ""
+        transferred = ""
     }
     else {
-        # We have a data line: write the required information to the status output
-        # TODO: shortcut - don't write the 100% transfer data for completed transfers more than once
-        total = to_bytes($2)
-        percent = $3
-        transferred = to_bytes($4)
-        remain = to_seconds($11)
-        speed = to_bytes($12)
+        # We have a data line, but only update the statistics variables if the transfer numbers match. This
+        # way, we avoid rewriting status files for completed transfers that were handled in a previous run
+        # of this script. Information is only written to the files whenever the data variables are non-empty,
+        # and they are reset to empty at each header line.
+        if (xfer_number == saved_xfer_number) {
+            total = to_bytes($2)
+            percent = $3
+            transferred = to_bytes($4)
+            remain = to_seconds($11)
+            speed = to_bytes($12)
+        }
     }
 }
 
 
 END {
-    # Write each requested file, assuming the corresponding variable has been set to a value.
-    # The _file variables are set by invoking this awk script with the -v option for each
-    # variable to be set.
-    if (percent != "" && percent_file != "") {
-        printf("%d\n", percent) > percent_file
-    }
-    if (remain != "" && remain_file != "") {
-        printf("%d\n", remain) > remain_file
-    }
-    if (speed != "" && speed_file != "") {
-        printf("%d\n", speed) > speed_file
-    }
-    if (total != "" && total_file != "") {
-        printf("%d\n", total) > total_file
-    }
-    if (transferred != "" && transferred_file != "") {
-        printf("%d\n", transferred) > transferred_file
-    }
+    # Write any remaining statistics data before exiting
+    write_stats()
 }

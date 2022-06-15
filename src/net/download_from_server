@@ -129,7 +129,7 @@ done
 
 # Generate the curl configuration by appending any curl options
 curl_conf="# generated curl configuration"
-if [ "$1" == "--" ]; then
+if [ x"$1" = x"--" ]; then
     shift
     while [ $# -gt 0 -a "x$1" != "--" ]; do
         if echo "$1" | grep -q '^-'; then
@@ -156,13 +156,13 @@ fi
 
 
 # Obtain the base URL and output path from the first two arguments. Clean up to remove any trailing slashes.
-baseurl=$(echo "$1" | sed 's/\/*$//')
+base_url=$(echo "$1" | sed 's/\/*$//')
 out_path=$(echo "$2" | sed 's/\/*$//')
 [ -z "${out_path}" ] && out_path="/"
 
 
-# Quick sanity check: be sure the baseurl actually looks like a URL
-if ! echo "${baseurl}" | grep -q '^[A-Za-z0-9][A-Za-z0-9]*://'; then
+# Quick sanity check: be sure the base URL actually looks like a URL
+if ! echo "${base_url}" | grep -q '^[A-Za-z0-9][A-Za-z0-9]*://'; then
     echo "Invalid URL format: $1" >&2
     exit 2
 fi
@@ -227,8 +227,9 @@ echo $$ > "${status_output}/wrapper_pid" || exit 1
 echo "${base_url}" > "${status_output}/base_url"
 echo "${xfer_count}" > "${status_output}/total_transfers"
 x=0
-while [ x -lt ${xfer_count} ]; do
+while [ "${x}" -lt "${xfer_count}" ]; do
     mkdir -p "${status_output}/${x}"
+    x=$((x + 1))
 done
 
 
@@ -247,11 +248,21 @@ curlpid=$!
 
 
 # While curl runs, update the progress information every second, yielding between updates
-ppid=$(ps -p "${curlpid}" -o ppid=)
-while [ "${ppid}" -eq "$$" ]; do
-    update_progress
-    sleep 1
+while true; do
     ppid=$(ps -p "${curlpid}" -o ppid=)
+    if [ -n "${ppid}" ]; then
+        if [ "${ppid}" -eq "$$" ]; then
+            update_progress
+            sleep 1
+        else
+            # The curl process ID number has already been reused by something else, since we're no
+            # longer its parent
+            break
+        fi
+    else
+        # curl has finished or died
+        break
+    fi
 done
 
 
@@ -265,11 +276,12 @@ status=$?
 echo "${status}" > "${status_output}/result"
 
 
+# TODO: fix cleanup
 # If the download failed, clean up the partial file
-if [ ${status} -ne 0 ]; then
-    rm -f "${out_path}"
-    exit 1
-fi
+#if [ ${status} -ne 0 ]; then
+#    rm -f "${out_path}"
+#    exit 1
+#fi
 
 
 exit ${status}
