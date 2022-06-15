@@ -69,9 +69,9 @@ level, status information consists of:
 
  base_url             The base URL from which files are downloaded
  current_transfer     The number of the current transfer
- http_codes           Response codes for all HTTP transfers
  progress.log         Raw progress output from curl
  result               Overall exit status, available when finished
+ status_codes         Exit and HTTP response codes for each transfer
  total_transfers      The total number of files to be transferred
 
 Each individual file transfer has its own status directory containing
@@ -80,7 +80,7 @@ information about the ongoing download:
  http_code            Response code for HTTP transfers
  percent              Integer percentage of the download completed
  remain               Time remaining in seconds
- result               Exit status of curl, after download finishes
+ result               Faux exit status?
  speed                Current transfer speed in bytes per second
  total                Total file size in bytes
  transferred          Total number of bytes downloaded so far
@@ -89,6 +89,23 @@ Note that percent, remain, and total require the server to provide a correct
 content-length (or equivalent) at the start of the download. These values
 therefore might not be available from some servers.
 EOF
+}
+
+
+# Aborts the curl process (used for signal handling).
+terminate_curl() {
+    # We only need to terminate curl if it is running. The curl process is running if curlpid is non-empty,
+    # the process with PID curlpid is found in the process table, and we are the parent of that process. This
+    # extra parent check avoids an unlikely but possible condition where curl dies while this code's main loop
+    # is asleep, and the PID number gets reused in the meantime.
+    if [ -n "${curlpid}" ]; then
+        local ppid=$(ps -p "${curlpid}" -o ppid=)
+        if [ -n "${ppid}" ]; then
+            if [ "${ppid}" -eq "$$" ]; then
+                kill "${curlpid}"
+            fi
+        fi
+    fi
 }
 
 
@@ -242,8 +259,8 @@ fi
 
 
 # Start curl in the background
-echo "${curl_conf}" | curl ${enable_config} -w '%{http_code}\n' -f -K - \
-    2>"${status_output}/progress.log" >"${status_output}/http_codes" &
+echo "${curl_conf}" | curl ${enable_config} -w '%{exitcode},%{http_code}\n' -f -K - \
+    2>"${status_output}/progress.log" >"${status_output}/status_codes" &
 curlpid=$!
 
 
