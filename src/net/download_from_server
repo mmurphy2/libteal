@@ -77,13 +77,15 @@ level, status information consists of:
 Each individual file transfer has its own status directory containing
 information about the ongoing download:
 
+ destination          Local path to which the download will be saved
  http_code            Response code for HTTP transfers
  percent              Integer percentage of the download completed
  remain               Time remaining in seconds
- result               Faux exit status?
+ result               Per-file transfer status
  speed                Current transfer speed in bytes per second
  total                Total file size in bytes
  transferred          Total number of bytes downloaded so far
+ url                  URL from which the transfer is made
 
 Note that percent, remain, and total require the server to provide a correct
 content-length (or equivalent) at the start of the download. These values
@@ -92,9 +94,11 @@ EOF
 }
 
 
-# Aborts the curl process (used for signal handling).
-terminate_curl() {
-    # We only need to terminate curl if it is running. The curl process is running if curlpid is non-empty,
+# signal_curl <signal>
+#
+# Signals the curl process.
+signal_curl() {
+    # We can only send a signal to curl if it is running. The curl process is running if curlpid is non-empty,
     # the process with PID curlpid is found in the process table, and we are the parent of that process. This
     # extra parent check avoids an unlikely but possible condition where curl dies while this code's main loop
     # is asleep, and the PID number gets reused in the meantime.
@@ -102,16 +106,46 @@ terminate_curl() {
         local ppid=$(ps -p "${curlpid}" -o ppid=)
         if [ -n "${ppid}" ]; then
             if [ "${ppid}" -eq "$$" ]; then
-                kill "${curlpid}"
+                kill -s "$1" "${curlpid}"
             fi
         fi
     fi
 }
 
 
+# Invokes the download_from_server.awk script to process the contents of the progress log. Since curl uses
+# carriage returns to overwrite the current transfer status line, we first convert these into newlines to let
+# awk handle them as individual records.
 update_progress() {
     cat "${status_output}/progress.log" | tr '\r' '\n' | \
         awk -f "${whereami}/download_from_server.awk" -v status_root="${status_output}"
+}
+
+
+# Signal handling wrappers
+sighup() {
+    # curl seems to ignore SIGHUP by default, so send SIGINT instead
+    signal_curl INT
+}
+
+sigint() {
+    signal_curl INT
+}
+
+sigquit() {
+    signal_curl QUIT
+}
+
+sigterm() {
+    signal_curl TERM
+}
+
+sigcont() {
+    signal_curl CONT
+}
+
+sigtstop() {
+    signal_curl TSTP
 }
 
 
@@ -197,30 +231,10 @@ else
 fi
 
 
-# Done checking URL and output path
+# Done checking URL and output path; now verify that the remaining number of arguments is even
 shift 2
-
-
-# Now we need to create the rest of the curl configuration file, which will consist of pairs of --url
-# and --output entries. Also figure out how many files we will transfer.
-xfer_count=0
-this_url=
-while [ $# -gt 0 ]; do
-    if [ -z "${this_url}" ]; then
-        # We will write both the URL and output entry together in the configuration file, so save the url for now
-        this_url="${base_url}/$1"
-    else
-        this_file="${out_path}/$1"
-        curl_conf=$(printf "%s\n--url \"%s\"\n--output \"%s\"" "${curl_conf}" "${this_url}" "${this_file}")
-        this_url=
-        xfer_count=$(( xfer_count + 1 ))
-    fi
-    shift
-done
-
-
-# If correct arguments have been given, this_url should be empty after generating the final configuration pair
-if [ -n "${this_url}" ]; then
+num_params="$#"
+if [ $(( num_params % 2 )) -ne 0 ]; then
     echo "Incorrect number of arguments: each remote needs local path" >&2
     exit 2
 fi
@@ -240,14 +254,30 @@ echo "${status_output}"
 echo $$ > "${status_output}/wrapper_pid" || exit 1
 
 
-# Write the base URL and total transfer count files, then create the progress directories
+# Now we need to create the rest of the curl configuration file, which will consist of pairs of --url
+# and --output entries. Also figure out how many files we will transfer.
+xfer_count=0
+this_url=
+while [ $# -gt 0 ]; do
+    if [ -z "${this_url}" ]; then
+        # We will write both the URL and output entry together in the configuration file, so save the url for now
+        this_url="${base_url}/$1"
+    else
+        this_file="${out_path}/$1"
+        curl_conf=$(printf "%s\n--url \"%s\"\n--output \"%s\"" "${curl_conf}" "${this_url}" "${this_file}")
+        mkdir -p "${status_output}/${xfer_count}"
+        echo "${this_url}" > "${status_output}/${xfer_count}/url"
+        echo "${this_file}" > "${status_output}/${xfer_count}/destination"
+        this_url=
+        xfer_count=$(( xfer_count + 1 ))
+    fi
+    shift
+done
+
+
+# Write the base URL and total transfer count files
 echo "${base_url}" > "${status_output}/base_url"
 echo "${xfer_count}" > "${status_output}/total_transfers"
-x=0
-while [ "${x}" -lt "${xfer_count}" ]; do
-    mkdir -p "${status_output}/${x}"
-    x=$((x + 1))
-done
 
 
 # If verbose mode is enabled, display the curl config on stderr
@@ -258,7 +288,16 @@ if [ -n "${verbose}" ]; then
 fi
 
 
-# Start curl in the background
+# Install signal handlers for use with curl
+trap sighup HUP
+trap sigint INT
+trap sigquit QUIT
+trap sigterm TERM
+trap sigcont CONT
+trap sigtstop TSTP
+
+
+# Now we can finally run curl (in the background)
 echo "${curl_conf}" | curl ${enable_config} -w '%{exitcode},%{http_code}\n' -f -K - \
     2>"${status_output}/progress.log" >"${status_output}/status_codes" &
 curlpid=$!
@@ -293,12 +332,35 @@ status=$?
 echo "${status}" > "${status_output}/result"
 
 
-# TODO: fix cleanup
-# If the download failed, clean up the partial file
-#if [ ${status} -ne 0 ]; then
-#    rm -f "${out_path}"
-#    exit 1
-#fi
+# Extract per-file status codes and HTTP response codes. Clean up any partially downloaded files.
+index=0
+while read -r line < "${status_output}/status_codes"; do
+    file_status=$(echo "${line}" | awk -F ',' '{print $1}')
+    http_code=$(echo "${line}" | awk -F ',' '{print $2}')
+
+    echo "${file_status}" > "${status_output}/${index}/result"
+    [ -n "${http_code}" ] && echo "${http_code}" > "${status_output}/${index}/http_code"
+
+    if [ "${file_status}" -ne 0 ]; then
+        out_path=$(cat "${status_output}/${index}/destination")
+        rm -f "${out_path}"
+    fi
+
+    index=$(( index + 1 ))
+done
 
 
+# If the transfer was interrupted before all URLs were attempted, clean up any remaining output files.
+while [ "${index}" -lt "${xfer_count}" ]; do
+    out_path=$(cat "${status_output}/${index}/destination")
+    if [ -f "${out_path}" ]; then
+        echo "${status}" > "${status_output}/${index}/result"
+        rm -f "${out_path}"
+    else
+        echo "-1" > "${status_output}/${index}/result"
+    fi
+done
+
+
+# Report curl's exit status as our own
 exit ${status}
