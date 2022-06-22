@@ -334,7 +334,7 @@ echo "${status}" > "${status_output}/result"
 
 # Extract per-file status codes and HTTP response codes. Clean up any partially downloaded files.
 index=0
-while read -r line < "${status_output}/status_codes"; do
+while read -r line; do
     file_status=$(echo "${line}" | awk -F ',' '{print $1}')
     http_code=$(echo "${line}" | awk -F ',' '{print $2}')
 
@@ -347,7 +347,7 @@ while read -r line < "${status_output}/status_codes"; do
     fi
 
     index=$(( index + 1 ))
-done
+done < "${status_output}/status_codes"
 
 
 # If the transfer was interrupted before all URLs were attempted, clean up any remaining output files.
