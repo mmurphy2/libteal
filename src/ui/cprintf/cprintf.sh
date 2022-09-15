@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Color printf, which supports background colors, foreground colors, and
 # font effects using styles. Color and font support is disabled whenever the

@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Style table loading tool for cprintf and topline styles.
 #

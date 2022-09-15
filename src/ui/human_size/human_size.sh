@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Converts between integer byte sizes and human-readable sizes. Only shell
 # integer arithmetic is used, so the sizes are merely ballpark approximations.

@@ -1,7 +1,6 @@
-#!/bin/dash
+#!/bin/sh
 #
-# Loads the non-commented lines of a list file, preserving the order of the
-# list. Multiple list files may be concatenated.
+# Verifies a file using a detached GPG signature file.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -22,41 +21,35 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
-#
+
 
 usage() {
     cat << EOF
-$0 [options] <list_file> [[list_file] ...]
+$0 [options] <file> <detached_signature_file>
 
 Options:
-    -d <char> | --delimiter <char>
-        Change the output delimiter from a newline to <char>. Note that
-        <char> must be a single character or escape sequence that is
-        valid as an argument to the tr(1) command.
+    -G <directory> | --gpg-home <directory>
+        Path to the GPG home directory for signature verification. By default,
+        the --homedir option is not passed to gpg2 unless this option is
+        given.
     -h | --help
         Show this help message and exit.
 
-This program loads a list of data from one or more list files. If multiple
-list files are specified, they are read in order. The order of data within
-each list file is also preserved.
+Performs GPG verification of a file with a detached signature, using the gpg2
+command. The location of the GPG home directory may be specified with the -G
+option (defaults to ~/.gnupg).
 
-List files may contain line comments that begin with #. Inline comments are
-not supported. The resulting list read by this program will contain all
-non-blank, non-comment lines, with leading and trailing whitespace removed.
+Yields an exit status of 0 for successful verification and 3 if verification
+fails.
 EOF
 }
 
-
-self=$(readlink -e "$0")
-whereami=$(dirname "${self}")
-
-
-delim=
+gpghome="${HOME}/.gnupg"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -d|--delimiter)
-            delim="$2"
+        -G|--gpg-home)
+            gpghome="$2"
             shift 2
         ;;
         -h|--help)
@@ -69,14 +62,17 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 [options] <list_file> [[list_file] ...]"
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 [options] <file> <detached_signature_file>" >&2
     exit 2
 fi
 
-data=$(cat "$@" | awk -f "${whereami}/load_list.awk")
-if [ -n "${delim}" ]; then
-    data=$(echo "${data}" | tr '\n' "${delim}")
-fi
 
-[ -n "${data}" ] && echo "${data}"
+# Perform the verification using gpg2
+gpg2 --homedir "${gpghome}" --verify "${sigfile}" "${have_file}" >&2
+result=$?
+
+
+[ ${result} -ne 0 ] && result=3
+exit ${result}

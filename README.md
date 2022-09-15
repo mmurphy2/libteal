@@ -1,6 +1,9 @@
 # libteal
 
-Library of useful shell code to facilitate other projects.
+Shell code function library to support other projects.
 
-As I identify common pieces of code that I want to be able to reuse from project to project, I will be
-populating this repository.
+
+## Work in Progress
+
+Work is currently underway to refactor this code into a set of shell functions for performance
+reasons.

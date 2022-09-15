@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Configuration file handler that supports a dialect of INI format.
 #

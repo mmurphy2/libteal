@@ -1,7 +1,7 @@
-#!/bin/dash
+#!/bin/sh
 #
-# Utility for importing and trusting a public GPG key, as well as verifying
-# the public key against a fingerprint.
+# Loads the non-commented lines of a list file, preserving the order of the
+# list. Multiple list files may be concatenated.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -26,28 +26,37 @@
 
 usage() {
     cat << EOF
-$0 [options] <keyfile> <fingerprint>
+$0 [options] <list_file> [[list_file] ...]
 
 Options:
-    -G <dir> | --homedir <dir>
-        Sets the --homedir option for gpg2 (defaults to ~/.gnupg).
+    -d <char> | --delimiter <char>
+        Change the output delimiter from a newline to <char>. Note that
+        <char> must be a single character or escape sequence that is
+        valid as an argument to the tr(1) command.
     -h | --help
-        Show this message and exit.
+        Show this help message and exit.
 
-Normally, this command will be used with -G to specify a GPG home directory
-for the key to be imported and checked. When run, this program first checks
-the GPG home directory to see if the public key with <fingerprint> is already
-imported. If not, the public key is imported from <keyfile> and marked as
-ultimately trusted.
+This program loads a list of data from one or more list files. If multiple
+list files are specified, they are read in order. The order of data within
+each list file is also preserved.
+
+List files may contain line comments that begin with #. Inline comments are
+not supported. The resulting list read by this program will contain all
+non-blank, non-comment lines, with leading and trailing whitespace removed.
 EOF
 }
 
 
-homedir="${HOME}/.gnupg"
+self=$(readlink -e "$0")
+whereami=$(dirname "${self}")
+
+
+delim=
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        -G|--homedir)
-            homedir="$2"
+        -d|--delimiter)
+            delim="$2"
             shift 2
         ;;
         -h|--help)
@@ -60,28 +69,14 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 [options] <keyfile> <fingerprint>"
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 [options] <list_file> [[list_file] ...]"
     exit 2
 fi
 
-
-fingerprint=$(echo "$2" | sed 's/://g')
-
-check_fp=$(gpg2 --homedir "${homedir}" --list-keys --with-colons | grep -A 1 '^pub:' | grep '^fpr:' | \
-           sed s/fpr// | sed 's/://g')
-#
-
-have_key=no
-for fp in ${check_fp}; do
-    if [ "x${fp}" = "x${fingerprint}" ]; then
-        have_key=yes
-    fi
-done
-
-if [ "${have_key}" = "no" ]; then
-    gpg2 --homedir "${homedir}" --trusted-key "${fingerprint}" --import "$1" || exit 1
+data=$(cat "$@" | awk -f "${whereami}/load_list.awk")
+if [ -n "${delim}" ]; then
+    data=$(echo "${data}" | tr '\n' "${delim}")
 fi
 
-exit 0
+[ -n "${data}" ] && echo "${data}"

@@ -1,6 +1,7 @@
-#!/bin/dash
+#!/bin/sh
 #
-# Verifies a file using a detached GPG signature file.
+# Utility for importing and trusting a public GPG key, as well as verifying
+# the public key against a fingerprint.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -21,35 +22,32 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
-
+#
 
 usage() {
     cat << EOF
-$0 [options] <file> <detached_signature_file>
+$0 [options] <keyfile> <fingerprint>
 
 Options:
-    -G <directory> | --gpg-home <directory>
-        Path to the GPG home directory for signature verification. By default,
-        the --homedir option is not passed to gpg2 unless this option is
-        given.
+    -G <dir> | --homedir <dir>
+        Sets the --homedir option for gpg2 (defaults to ~/.gnupg).
     -h | --help
-        Show this help message and exit.
+        Show this message and exit.
 
-Performs GPG verification of a file with a detached signature, using the gpg2
-command. The location of the GPG home directory may be specified with the -G
-option (defaults to ~/.gnupg).
-
-Yields an exit status of 0 for successful verification and 3 if verification
-fails.
+Normally, this command will be used with -G to specify a GPG home directory
+for the key to be imported and checked. When run, this program first checks
+the GPG home directory to see if the public key with <fingerprint> is already
+imported. If not, the public key is imported from <keyfile> and marked as
+ultimately trusted.
 EOF
 }
 
-gpghome="${HOME}/.gnupg"
 
+homedir="${HOME}/.gnupg"
 while [ $# -gt 0 ]; do
     case "$1" in
-        -G|--gpg-home)
-            gpghome="$2"
+        -G|--homedir)
+            homedir="$2"
             shift 2
         ;;
         -h|--help)
@@ -64,15 +62,26 @@ done
 
 
 if [ $# -ne 2 ]; then
-    echo "Usage: $0 [options] <file> <detached_signature_file>" >&2
+    echo "Usage: $0 [options] <keyfile> <fingerprint>"
     exit 2
 fi
 
 
-# Perform the verification using gpg2
-gpg2 --homedir "${gpghome}" --verify "${sigfile}" "${have_file}" >&2
-result=$?
+fingerprint=$(echo "$2" | sed 's/://g')
 
+check_fp=$(gpg2 --homedir "${homedir}" --list-keys --with-colons | grep -A 1 '^pub:' | grep '^fpr:' | \
+           sed s/fpr// | sed 's/://g')
+#
 
-[ ${result} -ne 0 ] && result=3
-exit ${result}
+have_key=no
+for fp in ${check_fp}; do
+    if [ "x${fp}" = "x${fingerprint}" ]; then
+        have_key=yes
+    fi
+done
+
+if [ "${have_key}" = "no" ]; then
+    gpg2 --homedir "${homedir}" --trusted-key "${fingerprint}" --import "$1" || exit 1
+fi
+
+exit 0

@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Verifies the checksum of a file.
 #

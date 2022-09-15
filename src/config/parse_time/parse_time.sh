@@ -1,6 +1,6 @@
-#!/bin/dash
+#!/bin/sh
 #
-# Download progress bar
+# Parses a time expression, producing the equivalent number of seconds.
 #
 # Copyright 2022 Coastal Carolina University
 #
@@ -21,5 +21,56 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
+#
 
-# TODO: tail -n 1 the status log, then create the bar
+usage() {
+    cat << EOF
+$0 <-h | --help | timespec>
+
+Converts an expression of time into a number of seconds. The time expression
+can be a literal number of seconds, or it can use the following time unit
+values within the string:
+
+y : years (365 days)
+b : 30-day months
+f : 14 days (fortnights)
+w : 7 days (weeks)
+d : days
+h : hours
+m : minutes
+s : seconds
+
+Examples:
+
+1y 3d 4h 5m
+1f 2d
+42 y
+EOF
+}
+
+whatami=$(readlink -e "$0")
+whereami=$(dirname "${whatami}")
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <-h | --help | timespec>"
+    exit 2
+fi
+
+case "$1" in
+    -h|--help)
+        usage
+        exit 0
+    ;;
+    *)
+        echo "$@" | sed 's/ //g' | \
+            sed 's/y/:y:/g' | \
+            sed 's/b/:b:/g' | \
+            sed 's/f/:f:/g' | \
+            sed 's/w/:w:/g' | \
+            sed 's/d/:d:/g' | \
+            sed 's/h/:h:/g' | \
+            sed 's/m/:m:/g' | \
+            sed 's/s/:s:/g' | \
+            awk -f "${whereami}/parse_time.awk"
+    ;;
+esac

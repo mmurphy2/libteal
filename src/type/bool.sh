@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Determines if a string represents a true or false value by comparing the
 # string to keys used for "true" (including true, yes, on, enable, and 1).

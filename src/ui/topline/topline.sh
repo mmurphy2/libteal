@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 #
 # Simple top of screen status line. This status line uses the top row of the
 # screen, which should work in all Bourne-compatible shells (zsh, in
