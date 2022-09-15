@@ -1,0 +1,12 @@
+pack_item <container> <internal_path>
+
+Packs an item, read from standard input, into the specified container script
+at the specified internal path. If the item has the same internal path as an
+existing item, the item becomes another segment of the existing item (i.e.
+both items are concatenated together on unpack). If replacement of an
+existing item is desired, run remove_item on the internal path first.
+
+Arguments:
+  <container>       Path to the container script
+  <internal_path>   Internal path at which to embed the item. The elements of
+                    this path may be separated by / or |.

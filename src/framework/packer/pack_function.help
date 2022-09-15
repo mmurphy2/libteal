@@ -1,0 +1,7 @@
+pack_function <container>
+
+Packs a code segment (nominally a function) into an output script container.
+Non-indented comment lines are removed. The code is read from standard input.
+
+Argument:
+  <container>    Container script onto which the code segment is appended.
