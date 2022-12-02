@@ -17,3 +17,6 @@ need to be run. Python has traditionally been cumbersome in this regard, since t
 makes running even a simple command and obtaining its standard output significantly more verbose
 than the shell equivalent. I am therefore going to take a stab at solving that problem, the progress
 of which may be found in my python3-libteal repository.
+
+Depending on the results of that experiment, I will either archive or continue development on
+shell libteal (this repository).
